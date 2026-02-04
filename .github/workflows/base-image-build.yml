@@ -1,0 +1,100 @@
+name: Build Base Image
+
+on:
+  # Monthly rebuild on the 1st at 00:00 UTC
+  schedule:
+    - cron: '0 0 1 * *'
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      image_version:
+        description: 'Base image version (e.g., 1.0.0)'
+        required: true
+        type: string
+  # Trigger on changes to base image files
+  push:
+    branches: [main]
+    paths:
+      - 'packer/drupal-base-rocky9.pkr.hcl'
+      - 'packer/ansible/playbook-base.yml'
+      - 'packer/ansible/templates/**'
+
+env:
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+jobs:
+  build-base-image:
+    name: Build Base Packer Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: Generate version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.image_version }}" ]; then
+            echo "version=${{ github.event.inputs.image_version }}" >> $GITHUB_OUTPUT
+          else
+            # For scheduled builds, use year.month format
+            echo "version=$(date +%Y.%m.0)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Packer Init
+        working-directory: packer
+        run: packer init .
+
+      - name: Packer Validate
+        working-directory: packer
+        run: |
+          packer validate \
+            -only='drupal-base-rocky9*' \
+            -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
+            -var "client_id=$ARM_CLIENT_ID" \
+            -var "client_secret=$ARM_CLIENT_SECRET" \
+            -var "tenant_id=$ARM_TENANT_ID" \
+            -var "use_azure_cli_auth=false" \
+            -var "image_version=${{ steps.version.outputs.version }}" \
+            -var "gallery_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
+            -var "gallery_name=${{ vars.GALLERY_NAME }}" \
+            -var "location=${{ vars.LOCATION }}" \
+            -var "replication_regions=[\"${{ vars.LOCATION }}\"]" \
+            .
+
+      - name: Packer Build
+        working-directory: packer
+        run: |
+          packer build \
+            -only='drupal-base-rocky9*' \
+            -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
+            -var "client_id=$ARM_CLIENT_ID" \
+            -var "client_secret=$ARM_CLIENT_SECRET" \
+            -var "tenant_id=$ARM_TENANT_ID" \
+            -var "use_azure_cli_auth=false" \
+            -var "image_version=${{ steps.version.outputs.version }}" \
+            -var "gallery_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
+            -var "gallery_name=${{ vars.GALLERY_NAME }}" \
+            -var "location=${{ vars.LOCATION }}" \
+            -var "replication_regions=[\"${{ vars.LOCATION }}\"]" \
+            .
+
+      - name: Output image version
+        run: |
+          echo "## Base Image Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** drupal-base-rocky-linux-9" >> $GITHUB_STEP_SUMMARY
+          echo "**Gallery:** ${{ vars.GALLERY_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This base image can now be used by the app image build workflow." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,30 @@
+[Unit]
+Description=S3Proxy - S3 API gateway for Azure Blob Storage
+Documentation=https://github.com/gaul/s3proxy
+After=network.target
+
+[Service]
+Type=simple
+User={{ s3proxy_user }}
+Group={{ s3proxy_group }}
+WorkingDirectory={{ s3proxy_home }}
+
+# Properties file populated by cloud-init at boot
+ExecStart=/usr/bin/java -jar {{ s3proxy_home }}/s3proxy.jar --properties /etc/s3proxy/s3proxy.properties
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ s3proxy_home }}/data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=s3proxy
+
+[Install]
+WantedBy=multi-user.target

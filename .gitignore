@@ -1,0 +1,36 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Packer
+packer_cache/
+*.pkrvars.hcl
+!*.pkrvars.hcl.example
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local backend config (contains sensitive data)
+backend.hcl
+
+# Environment-specific files
+*.auto.tfvars
+
+# Logs
+*.log

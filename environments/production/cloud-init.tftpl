@@ -1,0 +1,171 @@
+#cloud-config
+# Cloud-init configuration for lib-main Drupal VMSS instances
+# This configures database, storage, and runs Drupal site installation
+
+write_files:
+  # Drupal environment configuration (PHP)
+  - path: /etc/drupal/environment.php
+    permissions: '0640'
+    owner: root:drupal
+    content: |
+      <?php
+      /**
+       * Drupal environment configuration.
+       * Populated by cloud-init at boot time.
+       */
+
+      // Database configuration
+      $databases['default']['default'] = [
+        'database' => '${db_name}',
+        'username' => '${db_user}',
+        'password' => '${db_password}',
+        'host' => '${db_host}',
+        'port' => '5432',
+        'driver' => 'pgsql',
+        'prefix' => '',
+      ];
+
+      // Hash salt for security
+      $settings['hash_salt'] = '${hash_salt}';
+
+      // Trusted host patterns
+      $settings['trusted_host_patterns'] = [
+        '^localhost$',
+        '^127\.0\.0\.1$',
+        '^' . preg_quote('${lb_fqdn}', '/') . '$',
+      ];
+
+      // S3FS configuration for Azure Blob Storage via S3Proxy
+      $config['s3fs.settings']['bucket'] = '${storage_container}';
+      $config['s3fs.settings']['region'] = 'us-east-1';
+      $config['s3fs.settings']['use_customhost'] = TRUE;
+      $config['s3fs.settings']['hostname'] = 'localhost:8080';
+      $config['s3fs.settings']['use_path_style_endpoint'] = TRUE;
+      $config['s3fs.settings']['use_https'] = FALSE;
+
+      // S3FS credentials (not used with S3Proxy authorization=none)
+      $settings['s3fs.access_key'] = 'unused';
+      $settings['s3fs.secret_key'] = 'unused';
+
+      // Reverse proxy settings for Azure Load Balancer
+      $settings['reverse_proxy'] = TRUE;
+      $settings['reverse_proxy_addresses'] = ['127.0.0.1', '168.63.129.16'];
+      $settings['reverse_proxy_trusted_headers'] =
+        \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_FOR |
+        \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_HOST |
+        \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_PORT |
+        \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_PROTO;
+
+  # S3Proxy properties file
+  - path: /etc/s3proxy/s3proxy.properties
+    permissions: '0640'
+    owner: root:s3proxy
+    content: |
+      # S3Proxy configuration for Azure Blob Storage
+      jclouds.provider=azureblob
+      jclouds.identity=${storage_account}
+      jclouds.credential=${storage_key}
+      jclouds.endpoint=https://${storage_account}.blob.core.windows.net
+      s3proxy.authorization=none
+      s3proxy.endpoint=http://127.0.0.1:8080
+
+  # Drupal installation script
+  - path: /opt/drupal-init.sh
+    permissions: '0750'
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -e
+
+      DRUPAL_ROOT="/var/www/drupal"
+      DRUSH="$DRUPAL_ROOT/vendor/bin/drush"
+      LOG_FILE="/var/log/drupal-init.log"
+      LOCK_FILE="/var/run/drupal-init.lock"
+
+      # Prevent concurrent runs
+      exec 200>"$LOCK_FILE"
+      flock -n 200 || { echo "Another instance is running"; exit 0; }
+
+      log() {
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+      }
+
+      log "Starting Drupal initialization..."
+
+      # Wait for S3Proxy to be ready
+      for i in {1..30}; do
+        if curl -s http://127.0.0.1:8080/ > /dev/null 2>&1; then
+          log "S3Proxy is ready"
+          break
+        fi
+        log "Waiting for S3Proxy... ($i/30)"
+        sleep 2
+      done
+
+      # Fixed site UUID for config sync (set via Terraform)
+      SITE_UUID="${drupal_site_uuid}"
+      CONFIG_SYNC_DIR="$DRUPAL_ROOT/config/sync"
+
+      # Check if Drupal is already installed
+      cd "$DRUPAL_ROOT"
+      if sudo -u drupal $DRUSH status --field=bootstrap 2>/dev/null | grep -q "Successful"; then
+        log "Drupal already installed, running updates..."
+        sudo -u drupal $DRUSH updatedb -y 2>&1 | tee -a "$LOG_FILE" || true
+
+        # Import config if config/sync has files (not just empty directory)
+        if [ -f "$CONFIG_SYNC_DIR/system.site.yml" ]; then
+          log "Config sync directory has config, importing..."
+          sudo -u drupal $DRUSH config:import -y 2>&1 | tee -a "$LOG_FILE" || {
+            log "Config import failed (may be no changes), continuing..."
+          }
+        else
+          log "No config in sync directory, skipping import"
+        fi
+
+        sudo -u drupal $DRUSH cache:rebuild 2>&1 | tee -a "$LOG_FILE" || true
+        log "Updates complete"
+      else
+        log "Installing Drupal..."
+        sudo -u drupal $DRUSH site:install standard \
+          --db-url="pgsql://${db_user}:${db_password}@${db_host}:5432/${db_name}" \
+          --site-name="lib-main" \
+          --account-name=admin \
+          --account-pass="${drupal_admin_password}" \
+          --account-mail="admin@example.com" \
+          -y 2>&1 | tee -a "$LOG_FILE"
+
+        # Set fixed site UUID for config sync compatibility
+        log "Setting site UUID to $SITE_UUID..."
+        sudo -u drupal $DRUSH config:set system.site uuid "$SITE_UUID" -y 2>&1 | tee -a "$LOG_FILE"
+
+        log "Enabling S3FS module..."
+        sudo -u drupal $DRUSH en s3fs -y 2>&1 | tee -a "$LOG_FILE" || true
+
+        log "Rebuilding cache..."
+        sudo -u drupal $DRUSH cache:rebuild 2>&1 | tee -a "$LOG_FILE"
+
+        log "Drupal installation complete"
+      fi
+
+      log "Drupal initialization finished"
+
+runcmd:
+  # Ensure directories have correct ownership
+  - chown root:drupal /etc/drupal
+  - chmod 750 /etc/drupal
+  - chown root:drupal /etc/drupal/environment.php
+
+  - chown root:s3proxy /etc/s3proxy
+  - chmod 750 /etc/s3proxy
+  - chown root:s3proxy /etc/s3proxy/s3proxy.properties
+
+  # Start S3Proxy service
+  - systemctl start s3proxy
+  - systemctl status s3proxy || true
+
+  # Run Drupal initialization
+  - /opt/drupal-init.sh
+
+  # Restart web services
+  - systemctl restart php-fpm
+  - systemctl restart httpd

@@ -1,0 +1,9 @@
+# Terraform backend configuration for Azure Storage
+# Run: terraform init -backend-config=backend.hcl
+#
+# Copy this file to backend.hcl and update with actual values
+
+resource_group_name  = "lib-main-tfstate-rg"
+storage_account_name = "libmaintfstate5a6e642c"
+container_name       = "tfstate"
+key                  = "production/terraform.tfstate"

@@ -1,0 +1,337 @@
+name: Build on Dispatch
+
+# Triggered by repository_dispatch from lib-main repository
+# Event types:
+#   - drupal-pr: PR opened/updated in lib-main, triggers full PR workflow
+#   - drupal-release: Release tag pushed to lib-main, triggers production build
+#
+# Payload (client_payload):
+#   - drupal_repo: Git repository URL
+#   - drupal_ref: Branch/tag/SHA to checkout
+#   - drupal_sha: Full commit SHA
+#   - pr_number: PR number (for drupal-pr events)
+#   - release_tag: Release tag (for drupal-release events)
+
+on:
+  repository_dispatch:
+    types: [drupal-pr, drupal-release]
+
+env:
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  TF_VAR_admin_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+  TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+  TF_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
+  TF_VAR_gallery_resource_group_name: ${{ vars.GALLERY_RESOURCE_GROUP }}
+  TF_VAR_subnet_id: ${{ vars.SUBNET_ID }}
+  TF_VAR_location: ${{ vars.LOCATION }}
+
+jobs:
+  # Build image from lib-main codebase
+  build-image:
+    name: Build Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_version: ${{ steps.version.outputs.version }}
+      pr_number: ${{ github.event.client_payload.pr_number }}
+      is_release: ${{ github.event.action == 'drupal-release' }}
+
+    steps:
+      - name: Checkout infrastructure code
+        uses: actions/checkout@v4
+
+      - name: Validate dispatch payload
+        run: |
+          echo "Event type: ${{ github.event.action }}"
+          echo "Drupal repo: ${{ github.event.client_payload.drupal_repo }}"
+          echo "Drupal ref: ${{ github.event.client_payload.drupal_ref }}"
+          echo "Drupal SHA: ${{ github.event.client_payload.drupal_sha }}"
+
+          if [ -z "${{ github.event.client_payload.drupal_repo }}" ]; then
+            echo "::error::Missing drupal_repo in payload"
+            exit 1
+          fi
+
+      - name: Generate version
+        id: version
+        run: |
+          if [ "${{ github.event.action }}" == "drupal-pr" ]; then
+            # PR build: use 0.0.{PR_NUMBER}
+            PR_NUM="${{ github.event.client_payload.pr_number }}"
+            if [ -z "$PR_NUM" ]; then
+              echo "::error::Missing pr_number for drupal-pr event"
+              exit 1
+            fi
+            echo "version=0.0.${PR_NUM}" >> $GITHUB_OUTPUT
+            echo "Building PR image: 0.0.${PR_NUM}"
+          else
+            # Release build: use release tag (strip 'v' prefix if present)
+            RELEASE_TAG="${{ github.event.client_payload.release_tag }}"
+            if [ -z "$RELEASE_TAG" ]; then
+              echo "::error::Missing release_tag for drupal-release event"
+              exit 1
+            fi
+            VERSION="${RELEASE_TAG#v}"
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "Building release image: ${VERSION}"
+          fi
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Get base image version
+        id: base_version
+        run: |
+          echo "Querying Azure Shared Image Gallery for latest base image..."
+          VERSION=$(az sig image-version list \
+            --gallery-name ${{ vars.GALLERY_NAME }} \
+            --gallery-image-definition drupal-base-rocky-linux-9 \
+            --resource-group ${{ vars.GALLERY_RESOURCE_GROUP }} \
+            --query "sort_by([].name, &@)[-1]" -o tsv)
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::No base image found in gallery. Run base-image-build.yml first."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using base image version: $VERSION"
+
+      - name: Build image
+        working-directory: packer
+        run: |
+          packer init .
+          packer build \
+            -only='drupal-rocky9*' \
+            -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
+            -var "client_id=$ARM_CLIENT_ID" \
+            -var "client_secret=$ARM_CLIENT_SECRET" \
+            -var "tenant_id=$ARM_TENANT_ID" \
+            -var "use_azure_cli_auth=false" \
+            -var "image_version=${{ steps.version.outputs.version }}" \
+            -var "base_image_version=${{ steps.base_version.outputs.version }}" \
+            -var "gallery_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
+            -var "gallery_name=${{ vars.GALLERY_NAME }}" \
+            -var "image_name=drupal-rocky-linux-9" \
+            -var "location=${{ vars.LOCATION }}" \
+            -var "replication_regions=[\"${{ vars.LOCATION }}\"]" \
+            -var "drupal_repo=${{ github.event.client_payload.drupal_repo }}" \
+            -var "drupal_ref=${{ github.event.client_payload.drupal_ref }}" \
+            .
+
+      - name: Build Summary
+        run: |
+          echo "## Image Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Event Type:** ${{ github.event.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Drupal Repo:** ${{ github.event.client_payload.drupal_repo }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Drupal Ref:** ${{ github.event.client_payload.drupal_ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Drupal SHA:** ${{ github.event.client_payload.drupal_sha }}" >> $GITHUB_STEP_SUMMARY
+
+  # Deploy Dev Environment (PR builds only)
+  deploy-dev:
+    name: Deploy Dev
+    needs: build-image
+    if: github.event.action == 'drupal-pr'
+    runs-on: ubuntu-latest
+    environment: dev
+    outputs:
+      postgresql_fqdn: ${{ steps.outputs.outputs.postgresql_fqdn }}
+      dev_vm_ip: ${{ steps.outputs.outputs.public_ip }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: environments/dev
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=dev/pr-${{ needs.build-image.outputs.pr_number }}/terraform.tfstate"
+
+      - name: Terraform Apply
+        working-directory: environments/dev
+        run: |
+          terraform apply -auto-approve \
+            -var="pr_number=${{ needs.build-image.outputs.pr_number }}" \
+            -var="image_version=${{ needs.build-image.outputs.image_version }}"
+
+      - name: Get Outputs
+        id: outputs
+        working-directory: environments/dev
+        run: |
+          echo "postgresql_fqdn=$(terraform output -raw postgresql_fqdn)" >> $GITHUB_OUTPUT
+          echo "public_ip=$(terraform output -raw public_ip_address)" >> $GITHUB_OUTPUT
+
+      - name: Run Dev Validation Tests
+        run: |
+          DEV_IP="${{ steps.outputs.outputs.public_ip }}"
+          echo "Testing health endpoint on $DEV_IP..."
+
+          for i in {1..30}; do
+            if curl -sf http://${DEV_IP}/health; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Waiting for VM... (attempt $i/30)"
+            sleep 10
+          done
+
+          echo "Health check failed after 30 attempts"
+          exit 1
+
+      - name: Dev Deploy Summary
+        run: |
+          echo "## Dev Environment Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Dev Site URL:** http://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**PR Number:** ${{ needs.build-image.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Waiting for manual approval before proceeding to test environment." >> $GITHUB_STEP_SUMMARY
+
+  # Dev Review Gate (human approval required)
+  dev-review:
+    name: Dev Review
+    needs: [build-image, deploy-dev]
+    if: github.event.action == 'drupal-pr'
+    runs-on: ubuntu-latest
+    environment: dev-review
+
+    steps:
+      - name: Dev Review Approved
+        run: |
+          echo "## Dev Review Approved" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Proceeding to destroy dev VM and deploy test environment." >> $GITHUB_STEP_SUMMARY
+
+  # Deploy Test Environment
+  deploy-test:
+    name: Deploy Test
+    needs: [build-image, deploy-dev, dev-review]
+    if: github.event.action == 'drupal-pr'
+    runs-on: ubuntu-latest
+    environment: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # Destroy Dev VM (sequential: Dev -> Test)
+      - name: Destroy Dev VM
+        working-directory: environments/dev
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=dev/pr-${{ needs.build-image.outputs.pr_number }}/terraform.tfstate"
+          terraform destroy -auto-approve -target=module.dev_vm \
+            -var="pr_number=${{ needs.build-image.outputs.pr_number }}" \
+            -var="image_version=${{ needs.build-image.outputs.image_version }}"
+
+      # Deploy Test VM
+      - name: Terraform Init (Test)
+        working-directory: environments/test
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=test/pr-${{ needs.build-image.outputs.pr_number }}/terraform.tfstate"
+
+      - name: Deploy Test VM
+        working-directory: environments/test
+        run: |
+          terraform apply -auto-approve \
+            -var="pr_number=${{ needs.build-image.outputs.pr_number }}" \
+            -var="image_version=${{ needs.build-image.outputs.image_version }}"
+
+      - name: Get Test VM IP
+        id: outputs
+        working-directory: environments/test
+        run: |
+          echo "public_ip=$(terraform output -raw public_ip_address)" >> $GITHUB_OUTPUT
+
+      - name: Run Test Validation
+        run: |
+          TEST_IP="${{ steps.outputs.outputs.public_ip }}"
+          echo "Testing health endpoint on $TEST_IP..."
+
+          for i in {1..30}; do
+            if curl -sf http://${TEST_IP}/health; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Waiting for VM... (attempt $i/30)"
+            sleep 10
+          done
+
+          echo "Health check failed after 30 attempts"
+          exit 1
+
+      - name: Test Deploy Summary
+        run: |
+          echo "## Test Environment Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Site URL:** http://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
+
+  # Production Ready (requires approval)
+  production-ready:
+    name: Production Ready
+    needs: [build-image, deploy-test]
+    if: github.event.action == 'drupal-pr'
+    runs-on: ubuntu-latest
+    environment: production-approval
+
+    steps:
+      - name: Production Ready Summary
+        run: |
+          echo "## Production Ready" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This image has been validated in both dev and test environments." >> $GITHUB_STEP_SUMMARY
+          echo "Ready for production deployment via deploy-production.yml workflow." >> $GITHUB_STEP_SUMMARY
+
+  # Release deployment notification
+  release-notification:
+    name: Release Built
+    needs: build-image
+    if: github.event.action == 'drupal-release'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Release Summary
+        run: |
+          echo "## Release Image Built" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Drupal Ref:** ${{ github.event.client_payload.drupal_ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To deploy to production, run deploy-production.yml with:" >> $GITHUB_STEP_SUMMARY
+          echo "  image_version: ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,80 @@
+<VirtualHost *:80>
+    ServerName localhost
+    DocumentRoot {{ web_root }}/web
+
+    <Directory {{ web_root }}/web>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+
+        # Clean URLs via mod_rewrite
+        RewriteEngine On
+        RewriteBase /
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteCond %{REQUEST_FILENAME} !-d
+        RewriteRule ^ index.php [L]
+    </Directory>
+
+    # PHP-FPM via mod_proxy_fcgi
+    <FilesMatch \.php$>
+        SetHandler "proxy:unix:/run/php-fpm/drupal.sock|fcgi://localhost"
+    </FilesMatch>
+
+    # Health check endpoint (for Azure health probes)
+    <Location /health>
+        SetHandler none
+        Require all granted
+    </Location>
+
+    # Security headers
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Deny access to sensitive files
+    <FilesMatch "^\.ht">
+        Require all denied
+    </FilesMatch>
+
+    <DirectoryMatch "^{{ web_root }}/web/sites/.*/private/">
+        Require all denied
+    </DirectoryMatch>
+
+    # Block access to backup and config files
+    <FilesMatch "\.(txt|log|sql|bak|config)$">
+        Require all denied
+    </FilesMatch>
+
+    # Block access to vendor directory PHP files
+    <DirectoryMatch "^{{ web_root }}/vendor/">
+        <FilesMatch "\.php$">
+            Require all denied
+        </FilesMatch>
+    </DirectoryMatch>
+
+    # Static files caching
+    <FilesMatch "\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$">
+        ExpiresActive On
+        ExpiresDefault "access plus 30 days"
+        Header set Cache-Control "public, immutable"
+    </FilesMatch>
+
+    # Gzip compression
+    <IfModule mod_deflate.c>
+        AddOutputFilterByType DEFLATE text/plain
+        AddOutputFilterByType DEFLATE text/css
+        AddOutputFilterByType DEFLATE text/xml
+        AddOutputFilterByType DEFLATE application/json
+        AddOutputFilterByType DEFLATE application/javascript
+        AddOutputFilterByType DEFLATE application/rss+xml
+        AddOutputFilterByType DEFLATE application/atom+xml
+        AddOutputFilterByType DEFLATE image/svg+xml
+    </IfModule>
+
+    # Logging
+    ErrorLog /var/log/httpd/drupal-error.log
+    CustomLog /var/log/httpd/drupal-access.log combined
+
+    # Timeout for long-running PHP scripts
+    ProxyTimeout 300
+</VirtualHost>
