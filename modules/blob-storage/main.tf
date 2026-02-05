@@ -1,3 +1,18 @@
+# ------------------------------------------------------------------------------
+# Blob Storage Module
+# ------------------------------------------------------------------------------
+# Creates Azure Blob Storage for Drupal media files:
+#   - Storage account with configurable replication (LRS/GRS)
+#   - Private container for Drupal media
+#   - Optional soft delete and versioning
+#   - RBAC role assignment for VMSS managed identity
+#   - Optional private endpoint for secure access
+#
+# Integration:
+#   Drupal accesses blobs via S3Proxy (S3-compatible API gateway).
+#   VMSS identity needs Storage Blob Data Contributor role.
+# ------------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
   required_providers {

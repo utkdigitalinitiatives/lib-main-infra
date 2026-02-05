@@ -1,3 +1,18 @@
+# ------------------------------------------------------------------------------
+# PostgreSQL Dev/Test Module
+# ------------------------------------------------------------------------------
+# Creates an ephemeral PostgreSQL Flexible Server for PR validation:
+#   - Burstable tier (B1ms) for cost efficiency
+#   - Public network access with firewall rules for CI/CD
+#   - Minimal backup retention (7 days)
+#   - No geo-redundancy or high availability
+#   - Named with PR number for isolation (lib-main-pr-{number}-psql)
+#
+# Lifecycle:
+#   Created when PR is opened, destroyed when PR is closed.
+#   Shared between dev and test stages within the same PR workflow.
+# ------------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
   required_providers {

@@ -1,3 +1,19 @@
+# ------------------------------------------------------------------------------
+# Drupal VMSS Module
+# ------------------------------------------------------------------------------
+# Creates an Azure Linux Virtual Machine Scale Set for production Drupal:
+#   - Rocky Linux 9 from Azure Compute Gallery (Packer-built images)
+#   - Rolling upgrade policy for zero-downtime deployments
+#   - Application health extension for load balancer integration
+#   - Automatic instance repairs with configurable grace period
+#   - Optional autoscaling based on CPU metrics
+#   - System-assigned managed identity for Azure resource access
+#
+# Deployment:
+#   Image updates trigger rolling upgrades (20% batch size).
+#   Cloud-init configures database, storage, and Drupal settings.
+# ------------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
 

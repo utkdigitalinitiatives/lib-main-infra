@@ -1,3 +1,21 @@
+# ------------------------------------------------------------------------------
+# Test Environment
+# ------------------------------------------------------------------------------
+# Second stage of PR validation workflow. Reuses dev resources:
+#   - Resource Group: Uses existing lib-main-dev-pr-{number}-rg
+#   - PostgreSQL: References existing instance from dev stage
+#   - Test VM: Fresh instance for integration testing
+#
+# Workflow:
+#   1. Dev stage completes successfully
+#   2. Dev VM is destroyed (terraform destroy on dev)
+#   3. Test VM created in same resource group with same database
+#   4. Integration tests run against test VM
+#   5. On success, PR ready for manual approval
+#
+# Note: Dev VM must be destroyed before test VM is created (sequential stages).
+# ------------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
 

@@ -1,3 +1,18 @@
+# ------------------------------------------------------------------------------
+# Load Balancer Module
+# ------------------------------------------------------------------------------
+# Creates an Azure Standard Load Balancer for the Drupal VMSS:
+#   - Public IP with optional DNS label
+#   - Backend pool for VMSS instances
+#   - HTTP health probe (HTTPS optional)
+#   - Load balancing rules for HTTP/HTTPS traffic
+#   - Outbound rule for VMSS internet access (package updates, etc.)
+#
+# Usage:
+#   Connect VMSS to this load balancer via load_balancer_backend_pool_id output.
+#   SNAT is disabled on inbound rules - use outbound rule for egress.
+# ------------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
 
@@ -87,7 +102,7 @@ resource "azurerm_lb_rule" "http" {
   frontend_ip_configuration_name = "PublicIPAddress"
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.vmss.id]
   probe_id                       = azurerm_lb_probe.http.id
-  tcp_reset_enabled               = true
+  tcp_reset_enabled              = true
   idle_timeout_in_minutes        = var.idle_timeout_minutes
 
   # Disable outbound SNAT - recommended for production
@@ -106,7 +121,7 @@ resource "azurerm_lb_rule" "https" {
   frontend_ip_configuration_name = "PublicIPAddress"
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.vmss.id]
   probe_id                       = azurerm_lb_probe.https[0].id
-  tcp_reset_enabled               = true
+  tcp_reset_enabled              = true
   idle_timeout_in_minutes        = var.idle_timeout_minutes
 
   disable_outbound_snat = true

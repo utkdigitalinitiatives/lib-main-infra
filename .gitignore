@@ -34,3 +34,6 @@ backend.hcl
 
 # Logs
 *.log
+
+# Setup progress (temporary)
+SETUP-PROGRESS.md

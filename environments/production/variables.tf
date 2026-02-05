@@ -118,7 +118,7 @@ variable "postgresql_sku" {
 variable "postgresql_storage_mb" {
   description = "Storage size in MB for PostgreSQL"
   type        = number
-  default     = 32768  # 32 GB minimum
+  default     = 32768 # 32 GB minimum
 }
 
 variable "postgresql_version" {
@@ -163,7 +163,7 @@ variable "drupal_admin_password" {
   description = "Password for the Drupal admin user"
   type        = string
   sensitive   = true
-  default     = null  # If not provided, a random password will be generated
+  default     = null # If not provided, a random password will be generated
 }
 
 variable "drupal_site_uuid" {

@@ -1,3 +1,18 @@
+# ------------------------------------------------------------------------------
+# PostgreSQL Module
+# ------------------------------------------------------------------------------
+# Creates an Azure PostgreSQL Flexible Server for production Drupal:
+#   - Configurable SKU (Burstable for PoC, General Purpose for production)
+#   - Optional private network access via delegated subnet
+#   - Firewall rules for Azure services and specific IPs
+#   - Drupal database with UTF-8 encoding
+#   - pg_trgm extension enabled (required by Drupal 11)
+#
+# Network modes:
+#   - Public: Set delegated_subnet_id = null, configure firewall rules
+#   - Private: Provide delegated_subnet_id and private_dns_zone_id
+# ------------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
   required_providers {

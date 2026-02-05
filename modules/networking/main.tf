@@ -1,3 +1,18 @@
+# ------------------------------------------------------------------------------
+# Networking Module
+# ------------------------------------------------------------------------------
+# Creates the virtual network infrastructure for the Drupal application:
+#   - VNet with configurable address space
+#   - Web subnet for VMSS/VM instances
+#   - Private endpoints subnet for PostgreSQL and Blob Storage
+#   - Network Security Groups with rules for HTTP/HTTPS, SSH, and health probes
+#
+# Security model:
+#   - Supports Azure Front Door or direct Load Balancer access (toggle via variables)
+#   - SSH access restricted to specific CIDR blocks
+#   - Default deny rule for all other inbound traffic
+# ------------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
 

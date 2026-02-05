@@ -1,3 +1,16 @@
+# ------------------------------------------------------------------------------
+# Image Gallery Module
+# ------------------------------------------------------------------------------
+# Creates an Azure Compute Gallery for Drupal VM images:
+#   - Shared Image Gallery for storing Packer-built images
+#   - Image definition for Rocky Linux 9 Drupal images
+#   - Hyper-V Generation 2 (UEFI boot) for modern VM support
+#
+# Image tiers (managed by Packer):
+#   - drupal-base-rocky-linux-9: System packages, PHP, Apache (monthly builds)
+#   - drupal-rocky-linux-9: Drupal app from lib-main repo (per PR/release)
+# ------------------------------------------------------------------------------
+
 terraform {
   required_version = ">= 1.0"
   required_providers {
