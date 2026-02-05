@@ -60,8 +60,8 @@
       when: drupal_repo | default('') | length > 0
 
     # ==========================================================================
-    # Install Drush and S3FS module (only when using composer create-project)
-    # lib-main should already have these in composer.json
+    # Install Drush and S3FS module
+    # TODO: Move these dependencies to lib-main's composer.json and remove this task
     # ==========================================================================
     - name: Install Drush and S3FS module
       ansible.builtin.shell:
@@ -73,7 +73,6 @@
         COMPOSER_HOME: "/tmp/composer-{{ drupal_user }}"
       args:
         creates: "{{ web_root }}/vendor/bin/drush"
-      when: drupal_repo | default('') | length == 0
 
     # ==========================================================================
     # Drupal directory structure
