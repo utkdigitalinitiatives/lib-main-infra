@@ -11,7 +11,7 @@
 #
 # Deployment:
 #   terraform init -backend-config="resource_group_name=lib-main-tfstate-rg" \
-#     -backend-config="storage_account_name=libmaintfstate5a6e642c" \
+#     -backend-config="storage_account_name=<tfstate-storage-account>" \
 #     -backend-config="container_name=tfstate" \
 #     -backend-config="key=production/terraform.tfstate"
 #   terraform apply -var="image_version=1.0.0"

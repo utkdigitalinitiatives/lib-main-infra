@@ -29,7 +29,6 @@ provider "azurerm" {
 variable "subscription_id" {
   description = "Azure subscription ID"
   type        = string
-  default     = "9fc717ef-b8c4-4858-a677-7c7b518616a0"
 }
 
 # Accept Rocky Linux 9 marketplace terms
