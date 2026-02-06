@@ -279,10 +279,10 @@
         group: "{{ s3proxy_group }}"
         mode: "0640"
 
-    - name: Enable s3proxy service
+    - name: Reload systemd for s3proxy (do not enable; cloud-init starts it after writing config)
       ansible.builtin.systemd:
         name: s3proxy
-        enabled: true
+        enabled: false
         daemon_reload: true
 
     # ==========================================================================

@@ -159,7 +159,8 @@ runcmd:
   - chmod 750 /etc/s3proxy
   - chown root:s3proxy /etc/s3proxy/s3proxy.properties
 
-  # Start S3Proxy service
+  # Enable and start S3Proxy service (enabled here, not in image, to avoid boot race condition)
+  - systemctl enable s3proxy
   - systemctl start s3proxy
   - systemctl status s3proxy || true
 
