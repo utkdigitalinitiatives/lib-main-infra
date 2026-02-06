@@ -109,6 +109,7 @@ jobs:
           done
 
           echo "Warning: Health check did not pass within timeout"
+          exit 1
 
       - name: Deployment Summary
         run: |
