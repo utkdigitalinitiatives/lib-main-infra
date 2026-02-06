@@ -62,7 +62,12 @@ variable "assign_public_ip" {
   default     = true
 }
 
-# PostgreSQL configuration
+# Database configuration (references permanent devtest PostgreSQL)
+variable "devtest_db_host" {
+  description = "FQDN of the permanent devtest PostgreSQL server"
+  type        = string
+}
+
 variable "db_admin_username" {
   description = "PostgreSQL administrator username"
   type        = string
@@ -79,16 +84,4 @@ variable "db_name" {
   description = "Name of the Drupal database"
   type        = string
   default     = "drupal"
-}
-
-variable "db_sku_name" {
-  description = "SKU for PostgreSQL Flexible Server (Burstable tier for dev/test)"
-  type        = string
-  default     = "B_Standard_B1ms"
-}
-
-variable "db_allowed_ip_addresses" {
-  description = "List of IP addresses allowed to connect to PostgreSQL"
-  type        = list(string)
-  default     = []
 }

@@ -1,19 +1,20 @@
 # ------------------------------------------------------------------------------
 # Test Environment
 # ------------------------------------------------------------------------------
-# Second stage of PR validation workflow. Reuses dev resources:
-#   - Resource Group: Uses existing lib-main-dev-pr-{number}-rg
-#   - PostgreSQL: References existing instance from dev stage
+# Second stage of PR validation workflow. Creates its own ephemeral resources:
+#   - Resource Group: lib-main-test-pr-{number}-rg
 #   - Test VM: Fresh instance for integration testing
 #
+# Database is provided by the permanent devtest PostgreSQL instance,
+# re-synced from production by the CI/CD workflow before deployment.
+#
 # Workflow:
-#   1. Dev stage completes successfully
-#   2. Dev VM is destroyed (terraform destroy on dev)
-#   3. Test VM created in same resource group with same database
+#   1. Dev stage completes successfully and is destroyed
+#   2. Production DB re-synced to devtest PostgreSQL
+#   3. Test VM created in its own resource group
 #   4. Integration tests run against test VM
 #   5. On success, PR ready for manual approval
-#
-# Note: Dev VM must be destroyed before test VM is created (sequential stages).
+#   6. On PR close, cleanup workflow destroys test resources
 # ------------------------------------------------------------------------------
 
 terraform {
@@ -44,26 +45,28 @@ data "azurerm_shared_image_version" "drupal" {
   resource_group_name = var.gallery_resource_group_name
 }
 
-# Data source: Reference existing dev resource group (shared with dev environment)
-data "azurerm_resource_group" "dev" {
-  name = var.pr_number != null ? "lib-main-dev-pr-${var.pr_number}-rg" : "lib-main-dev-rg"
+# Resource group for test resources (ephemeral per PR)
+resource "azurerm_resource_group" "test" {
+  name     = var.pr_number != null ? "lib-main-test-pr-${var.pr_number}-rg" : "lib-main-test-rg"
+  location = var.location
+
+  tags = {
+    Environment = "test"
+    PRNumber    = var.pr_number != null ? var.pr_number : "none"
+    ManagedBy   = "terraform"
+    Project     = "lib-main"
+    Ephemeral   = var.pr_number != null ? "true" : "false"
+  }
 }
 
-# Data source: Reference existing PostgreSQL from dev environment
-data "azurerm_postgresql_flexible_server" "dev" {
-  name                = var.pr_number != null ? "lib-main-pr-${var.pr_number}-psql" : "lib-main-dev-psql"
-  resource_group_name = data.azurerm_resource_group.dev.name
-}
-
-# Test VM (second validation stage, uses same PostgreSQL as dev)
-# Note: Dev VM should be destroyed before creating Test VM (sequential workflow)
+# Test VM (second validation stage, uses permanent devtest PostgreSQL)
 module "test_vm" {
   source = "../../modules/drupal-dev-vm"
 
   environment          = "test"
   pr_number            = var.pr_number
-  resource_group_name  = data.azurerm_resource_group.dev.name
-  location             = data.azurerm_resource_group.dev.location
+  resource_group_name  = azurerm_resource_group.test.name
+  location             = var.location
   subnet_id            = var.subnet_id
   source_image_id      = data.azurerm_shared_image_version.drupal.id
   vm_size              = var.vm_size
@@ -71,9 +74,9 @@ module "test_vm" {
   admin_ssh_public_key = var.admin_ssh_public_key
   assign_public_ip     = var.assign_public_ip
 
-  # Pass database connection info via cloud-init (uses dev PostgreSQL)
+  # Pass database connection info via cloud-init (uses permanent devtest PostgreSQL)
   custom_data = templatefile("${path.module}/cloud-init.tftpl", {
-    db_host     = data.azurerm_postgresql_flexible_server.dev.fqdn
+    db_host     = var.devtest_db_host
     db_name     = var.db_name
     db_user     = var.db_admin_username
     db_password = var.db_admin_password

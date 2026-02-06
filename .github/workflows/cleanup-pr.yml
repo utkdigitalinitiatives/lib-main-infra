@@ -15,6 +15,7 @@ env:
   TF_VAR_gallery_resource_group_name: ${{ vars.GALLERY_RESOURCE_GROUP }}
   TF_VAR_subnet_id: ${{ vars.SUBNET_ID }}
   TF_VAR_location: ${{ vars.LOCATION }}
+  TF_VAR_devtest_db_host: ${{ vars.DEVTEST_DB_HOST }}
 
 jobs:
   cleanup:
@@ -48,7 +49,7 @@ jobs:
         run: |
           echo "TF_VAR_image_version=latest" >> $GITHUB_ENV
 
-      # Destroy Test VM first (if exists)
+      # Destroy Test environment (if exists)
       - name: Destroy Test Environment
         working-directory: environments/test
         continue-on-error: true
@@ -61,7 +62,7 @@ jobs:
           terraform destroy -auto-approve -refresh=false \
             -var="pr_number=${{ steps.pr_number.outputs.pr_number }}" || true
 
-      # Destroy Dev environment (PostgreSQL + VM + Resource Group)
+      # Destroy Dev environment (VM + Resource Group)
       - name: Destroy Dev Environment
         working-directory: environments/dev
         run: |
@@ -79,6 +80,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**PR Number:** ${{ steps.pr_number.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
           echo "**Resources Destroyed:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Dev/Test Resource Group" >> $GITHUB_STEP_SUMMARY
-          echo "- PostgreSQL Flexible Server" >> $GITHUB_STEP_SUMMARY
-          echo "- Dev and Test VMs" >> $GITHUB_STEP_SUMMARY
+          echo "- Dev Resource Group and VM" >> $GITHUB_STEP_SUMMARY
+          echo "- Test Resource Group and VM" >> $GITHUB_STEP_SUMMARY

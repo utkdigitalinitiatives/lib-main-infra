@@ -1,6 +1,6 @@
 output "resource_group_name" {
-  description = "Name of the dev resource group (shared)"
-  value       = data.azurerm_resource_group.dev.name
+  description = "Name of the test resource group"
+  value       = azurerm_resource_group.test.name
 }
 
 # VM outputs
@@ -32,17 +32,6 @@ output "ssh_connection_string" {
 output "vm_identity_principal_id" {
   description = "Principal ID of the VM's managed identity"
   value       = module.test_vm.vm_identity_principal_id
-}
-
-# PostgreSQL outputs (from dev environment)
-output "postgresql_fqdn" {
-  description = "Fully qualified domain name of PostgreSQL server (from dev)"
-  value       = data.azurerm_postgresql_flexible_server.dev.fqdn
-}
-
-output "postgresql_server_name" {
-  description = "Name of the PostgreSQL server (from dev)"
-  value       = data.azurerm_postgresql_flexible_server.dev.name
 }
 
 # Image outputs

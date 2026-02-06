@@ -1,5 +1,11 @@
+variable "location" {
+  description = "Azure region for resources"
+  type        = string
+  default     = "eastus2"
+}
+
 variable "pr_number" {
-  description = "Pull request number (must match dev environment)"
+  description = "Pull request number for ephemeral environments"
   type        = string
   default     = null
 }
@@ -56,15 +62,20 @@ variable "assign_public_ip" {
   default     = true
 }
 
-# Database configuration (references dev PostgreSQL)
+# Database configuration (references permanent devtest PostgreSQL)
+variable "devtest_db_host" {
+  description = "FQDN of the permanent devtest PostgreSQL server"
+  type        = string
+}
+
 variable "db_admin_username" {
-  description = "PostgreSQL administrator username (same as dev)"
+  description = "PostgreSQL administrator username (same credentials as devtest)"
   type        = string
   default     = "drupaladmin"
 }
 
 variable "db_admin_password" {
-  description = "PostgreSQL administrator password (same as dev)"
+  description = "PostgreSQL administrator password (same credentials as devtest)"
   type        = string
   sensitive   = true
 }

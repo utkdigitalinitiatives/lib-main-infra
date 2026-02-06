@@ -3,15 +3,19 @@
 # ------------------------------------------------------------------------------
 # First stage of PR validation workflow. Creates ephemeral resources:
 #   - Resource Group: lib-main-dev-pr-{number}-rg
-#   - PostgreSQL: Burstable instance for CI/CD testing
 #   - Dev VM: Single instance for initial validation
+#
+# Database is provided by the permanent devtest PostgreSQL instance,
+# synced from production by the CI/CD workflow before deployment.
 #
 # Workflow:
 #   1. lib-main repo pushes code → triggers repository_dispatch
 #   2. Packer builds image with PR code
-#   3. Dev environment deploys image for smoke tests
-#   4. On success, test environment runs integration tests
-#   5. On PR close, cleanup workflow destroys all PR resources
+#   3. Production DB synced to devtest PostgreSQL
+#   4. Dev environment deploys image for smoke tests
+#   5. On success, dev environment is destroyed
+#   6. DB re-synced, test environment deploys for integration tests
+#   7. On PR close, cleanup workflow destroys remaining PR resources
 #
 # State isolation:
 #   Each PR gets its own state file: dev/pr-{number}/terraform.tfstate
@@ -59,27 +63,6 @@ resource "azurerm_resource_group" "dev" {
   }
 }
 
-# Ephemeral PostgreSQL for dev/test (created per PR)
-module "postgresql" {
-  source = "../../modules/postgresql-devtest"
-
-  environment            = "dev"
-  pr_number              = var.pr_number
-  resource_group_name    = azurerm_resource_group.dev.name
-  location               = var.location
-  administrator_login    = var.db_admin_username
-  administrator_password = var.db_admin_password
-  database_name          = var.db_name
-  sku_name               = var.db_sku_name
-  allowed_ip_addresses   = var.db_allowed_ip_addresses
-
-  tags = {
-    Environment = "dev"
-    PRNumber    = var.pr_number != null ? var.pr_number : "none"
-    Project     = "lib-main"
-  }
-}
-
 # Dev VM (first validation stage in PR workflow)
 module "dev_vm" {
   source = "../../modules/drupal-dev-vm"
@@ -95,11 +78,11 @@ module "dev_vm" {
   admin_ssh_public_key = var.admin_ssh_public_key
   assign_public_ip     = var.assign_public_ip
 
-  # Pass database connection info via cloud-init
+  # Pass database connection info via cloud-init (uses permanent devtest PostgreSQL)
   custom_data = templatefile("${path.module}/cloud-init.tftpl", {
-    db_host     = module.postgresql.fqdn
-    db_name     = module.postgresql.database_name
-    db_user     = module.postgresql.administrator_login
+    db_host     = var.devtest_db_host
+    db_name     = var.db_name
+    db_user     = var.db_admin_username
     db_password = var.db_admin_password
   })
 
@@ -110,6 +93,4 @@ module "dev_vm" {
     Stage        = "dev-validation"
     ImageVersion = var.image_version
   }
-
-  depends_on = [module.postgresql]
 }

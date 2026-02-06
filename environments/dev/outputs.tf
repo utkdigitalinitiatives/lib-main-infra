@@ -34,28 +34,6 @@ output "vm_identity_principal_id" {
   value       = module.dev_vm.vm_identity_principal_id
 }
 
-# PostgreSQL outputs
-output "postgresql_server_name" {
-  description = "Name of the PostgreSQL server"
-  value       = module.postgresql.server_name
-}
-
-output "postgresql_fqdn" {
-  description = "Fully qualified domain name of PostgreSQL server"
-  value       = module.postgresql.fqdn
-}
-
-output "postgresql_database_name" {
-  description = "Name of the Drupal database"
-  value       = module.postgresql.database_name
-}
-
-output "postgresql_connection_string" {
-  description = "PostgreSQL connection string (without password)"
-  value       = module.postgresql.connection_string
-  sensitive   = true
-}
-
 # Image outputs
 output "image_version" {
   description = "Image version deployed to VM"
