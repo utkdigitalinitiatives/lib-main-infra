@@ -1,9 +1,6 @@
 name: Cleanup PR Environment
 
 on:
-  pull_request:
-    types: [closed]
-  # Also cleanup when dispatched from lib-main PR closure
   repository_dispatch:
     types: [drupal-pr-closed]
 
