@@ -300,10 +300,25 @@ jobs:
           echo "**Test Site URL:** http://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
 
+  # Test Review Gate (human approval required)
+  test-review:
+    name: Test Review
+    needs: [build-image, deploy-test]
+    if: github.event.action == 'drupal-pr'
+    runs-on: ubuntu-latest
+    environment: test-review
+
+    steps:
+      - name: Test Review Approved
+        run: |
+          echo "## Test Review Approved" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Test environment validated. Proceeding to production approval." >> $GITHUB_STEP_SUMMARY
+
   # Production Ready (requires approval)
   production-ready:
     name: Production Ready
-    needs: [build-image, deploy-test]
+    needs: [build-image, deploy-test, test-review]
     if: github.event.action == 'drupal-pr'
     runs-on: ubuntu-latest
     environment: production-approval
