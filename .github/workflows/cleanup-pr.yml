@@ -58,7 +58,7 @@ jobs:
             -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=tfstate" \
             -backend-config="key=test/pr-${{ steps.pr_number.outputs.pr_number }}/terraform.tfstate"
-          terraform destroy -auto-approve \
+          terraform destroy -auto-approve -refresh=false \
             -var="pr_number=${{ steps.pr_number.outputs.pr_number }}" || true
 
       # Destroy Dev environment (PostgreSQL + VM + Resource Group)
@@ -70,7 +70,7 @@ jobs:
             -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=tfstate" \
             -backend-config="key=dev/pr-${{ steps.pr_number.outputs.pr_number }}/terraform.tfstate"
-          terraform destroy -auto-approve \
+          terraform destroy -auto-approve -refresh=false \
             -var="pr_number=${{ steps.pr_number.outputs.pr_number }}"
 
       - name: Cleanup Summary
