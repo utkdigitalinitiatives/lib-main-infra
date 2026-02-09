@@ -26,6 +26,7 @@ lib-main-infra/
 ├── modules/                         # Reusable Terraform modules
 ├── environments/
 │   ├── production/                  # Production environment
+│   ├── devtest/                     # Permanent shared PostgreSQL + Automation
 │   ├── dev/                         # Ephemeral PR dev stage
 │   └── test/                        # Ephemeral PR test stage
 └── bootstrap/                       # Azure setup scripts
@@ -74,6 +75,8 @@ This infrastructure repo works with the [lib-main](https://github.com/utkdigital
    - `TF_STATE_STORAGE_ACCOUNT`: (from bootstrap output)
    - `SUBNET_ID`: (created after first Terraform apply)
    - `LB_DNS_LABEL`: `lib-main` (or preferred DNS label)
+   - `DEVTEST_DB_HOST`: (created after devtest Terraform apply)
+   - `DRUPAL_SITE_UUID`: Fixed Drupal site UUID for config sync
 
 4. **Build base image first**:
    Run `base-image-build.yml` workflow manually before any PR workflow.
@@ -108,8 +111,10 @@ terraform plan -var="subscription_id=..." -var="admin_ssh_public_key=..." ...
 | `lib-main-images-rg` | Azure Compute Gallery and Packer resources |
 | `lib-main-tfstate-rg` | Terraform state storage |
 | `lib-main-production-rg` | Production infrastructure |
-| `lib-main-dev-pr-{N}-rg` | Ephemeral PR resources |
+| `lib-main-devtest-rg` | Permanent shared PostgreSQL + Automation |
+| `lib-main-dev-pr-{N}-rg` | Ephemeral PR dev resources |
+| `lib-main-test-pr-{N}-rg` | Ephemeral PR test resources |
 
 ## License
 
-Private repository - UTK Libraries
+Public repository - UTK Libraries
