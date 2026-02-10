@@ -16,6 +16,10 @@ on:
   repository_dispatch:
     types: [drupal-pr, drupal-release]
 
+concurrency:
+  group: pr-${{ github.event.client_payload.pr_number || github.run_id }}
+  cancel-in-progress: true
+
 env:
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -112,6 +116,7 @@ jobs:
         run: |
           packer init .
           packer build \
+            -force \
             -only='drupal-rocky9*' \
             -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
             -var "client_id=$ARM_CLIENT_ID" \
