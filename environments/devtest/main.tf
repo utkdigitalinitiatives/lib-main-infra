@@ -64,6 +64,20 @@ module "postgresql" {
   })
 }
 
+module "blob_storage" {
+  source = "../../modules/blob-storage"
+
+  environment                = local.environment
+  resource_group_name        = azurerm_resource_group.devtest.name
+  location                   = var.location
+  container_name             = "drupal-media"
+  replication_type           = "LRS"
+  soft_delete_retention_days = 7
+  enable_versioning          = false
+
+  tags = local.common_tags
+}
+
 module "automation" {
   source = "../../modules/azure-automation"
 

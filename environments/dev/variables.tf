@@ -85,3 +85,15 @@ variable "db_name" {
   type        = string
   default     = "drupal"
 }
+
+# Blob storage configuration (references permanent devtest storage account)
+variable "devtest_storage_account" {
+  description = "Name of the permanent devtest storage account"
+  type        = string
+}
+
+variable "devtest_storage_key" {
+  description = "Access key for the permanent devtest storage account"
+  type        = string
+  sensitive   = true
+}

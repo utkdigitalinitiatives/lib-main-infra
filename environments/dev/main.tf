@@ -80,10 +80,12 @@ module "dev_vm" {
 
   # Pass database connection info via cloud-init (uses permanent devtest PostgreSQL)
   custom_data = templatefile("${path.module}/cloud-init.tftpl", {
-    db_host     = var.devtest_db_host
-    db_name     = var.db_name
-    db_user     = var.db_admin_username
-    db_password = var.db_admin_password
+    db_host         = var.devtest_db_host
+    db_name         = var.db_name
+    db_user         = var.db_admin_username
+    db_password     = var.db_admin_password
+    storage_account = var.devtest_storage_account
+    storage_key     = var.devtest_storage_key
   })
 
   tags = {

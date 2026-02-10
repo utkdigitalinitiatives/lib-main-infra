@@ -25,11 +25,31 @@ write_files:
         'prefix' => '',
       ];
 
+  # S3Proxy configuration for blob storage access
+  - path: /etc/s3proxy/s3proxy.properties
+    permissions: '0640'
+    owner: root:s3proxy
+    content: |
+      jclouds.provider=azureblob
+      jclouds.identity=${storage_account}
+      jclouds.credential=${storage_key}
+      jclouds.endpoint=https://${storage_account}.blob.core.windows.net
+      s3proxy.authorization=none
+      s3proxy.endpoint=http://127.0.0.1:8080
+
 runcmd:
   # Ensure drupal group exists and has access to config directory
   - groupadd -f drupal
   - chown -R root:drupal /etc/drupal
   - chmod 750 /etc/drupal
+
+  # Configure and start S3Proxy for blob storage
+  - chown root:s3proxy /etc/s3proxy
+  - chmod 750 /etc/s3proxy
+  - chown root:s3proxy /etc/s3proxy/s3proxy.properties
+  - systemctl enable s3proxy
+  - systemctl start s3proxy
+  - systemctl status s3proxy || true
 
   # Replace the getenv()-based database config in environment.php with require_once
   # The Packer image's environment.php uses getenv() which doesn't work with PHP-FPM

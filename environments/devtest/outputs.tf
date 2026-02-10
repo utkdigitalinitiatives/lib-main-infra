@@ -22,3 +22,13 @@ output "automation_account_name" {
   description = "Name of the Automation Account"
   value       = module.automation.automation_account_name
 }
+
+output "storage_account_name" {
+  description = "Name of the devtest storage account"
+  value       = module.blob_storage.storage_account_name
+}
+
+output "storage_container_name" {
+  description = "Name of the blob container"
+  value       = module.blob_storage.container_name
+}
