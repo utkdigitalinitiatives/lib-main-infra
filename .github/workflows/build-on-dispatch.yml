@@ -1,20 +1,17 @@
 name: Build on Dispatch
 
 # Triggered by repository_dispatch from lib-main repository
-# Event types:
-#   - drupal-pr: PR opened/updated in lib-main, triggers full PR workflow
-#   - drupal-release: Release tag pushed to lib-main, triggers production build
+# Event type: drupal-pr (PR opened/updated in lib-main)
 #
 # Payload (client_payload):
 #   - drupal_repo: Git repository URL
 #   - drupal_ref: Branch/tag/SHA to checkout
 #   - drupal_sha: Full commit SHA
-#   - pr_number: PR number (for drupal-pr events)
-#   - release_tag: Release tag (for drupal-release events)
+#   - pr_number: PR number
 
 on:
   repository_dispatch:
-    types: [drupal-pr, drupal-release]
+    types: [drupal-pr]
 
 concurrency:
   group: pr-${{ github.event.client_payload.pr_number || github.run_id }}
@@ -33,6 +30,11 @@ env:
   TF_VAR_location: ${{ vars.LOCATION }}
   TF_VAR_devtest_db_host: ${{ vars.DEVTEST_DB_HOST }}
   TF_VAR_devtest_storage_account: ${{ vars.DEVTEST_STORAGE_ACCOUNT }}
+  TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_use_gallery_image: "true"
+  TF_VAR_lb_dns_label: ${{ vars.LB_DNS_LABEL }}
+  TF_VAR_enable_vmss_blob_access: "true"
+  TF_VAR_drupal_site_uuid: ${{ vars.DRUPAL_SITE_UUID }}
 
 jobs:
   # Build image from lib-main codebase
@@ -42,7 +44,6 @@ jobs:
     outputs:
       image_version: ${{ steps.version.outputs.version }}
       pr_number: ${{ github.event.client_payload.pr_number }}
-      is_release: ${{ github.event.action == 'drupal-release' }}
 
     steps:
       - name: Checkout infrastructure code
@@ -63,26 +64,13 @@ jobs:
       - name: Generate version
         id: version
         run: |
-          if [ "${{ github.event.action }}" == "drupal-pr" ]; then
-            # PR build: use 0.0.{PR_NUMBER}
-            PR_NUM="${{ github.event.client_payload.pr_number }}"
-            if [ -z "$PR_NUM" ]; then
-              echo "::error::Missing pr_number for drupal-pr event"
-              exit 1
-            fi
-            echo "version=0.0.${PR_NUM}" >> $GITHUB_OUTPUT
-            echo "Building PR image: 0.0.${PR_NUM}"
-          else
-            # Release build: use release tag (strip 'v' prefix if present)
-            RELEASE_TAG="${{ github.event.client_payload.release_tag }}"
-            if [ -z "$RELEASE_TAG" ]; then
-              echo "::error::Missing release_tag for drupal-release event"
-              exit 1
-            fi
-            VERSION="${RELEASE_TAG#v}"
-            echo "version=${VERSION}" >> $GITHUB_OUTPUT
-            echo "Building release image: ${VERSION}"
+          PR_NUM="${{ github.event.client_payload.pr_number }}"
+          if [ -z "$PR_NUM" ]; then
+            echo "::error::Missing pr_number in payload"
+            exit 1
           fi
+          echo "version=0.0.${PR_NUM}" >> $GITHUB_OUTPUT
+          echo "Building PR image: 0.0.${PR_NUM}"
 
       - name: Setup Packer
         uses: hashicorp/setup-packer@main
@@ -509,22 +497,102 @@ jobs:
           echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "This image has been validated in both dev and test environments." >> $GITHUB_STEP_SUMMARY
-          echo "Ready for production deployment via deploy-production.yml workflow." >> $GITHUB_STEP_SUMMARY
+          echo "Deploying to production..." >> $GITHUB_STEP_SUMMARY
 
-  # Release deployment notification
-  release-notification:
-    name: Release Built
-    needs: build-image
-    if: github.event.action == 'drupal-release'
+  # Deploy tested image to production
+  deploy-production:
+    name: Deploy to Production
+    needs: [build-image, production-ready]
+    if: github.event.action == 'drupal-pr'
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
-      - name: Release Summary
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: environments/production
         run: |
-          echo "## Release Image Built" >> $GITHUB_STEP_SUMMARY
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=production/terraform.tfstate"
+
+      - name: Terraform Plan
+        working-directory: environments/production
+        run: |
+          terraform plan \
+            -var="image_version=${{ needs.build-image.outputs.image_version }}" \
+            -out=tfplan
+
+      - name: Terraform Apply (Rolling Update)
+        working-directory: environments/production
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get VMSS Details
+        id: vmss
+        working-directory: environments/production
+        run: |
+          echo "vmss_name=$(terraform output -raw vmss_name)" >> $GITHUB_OUTPUT
+          echo "vmss_id=$(terraform output -raw vmss_id)" >> $GITHUB_OUTPUT
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "application_url=$(terraform output -raw application_url)" >> $GITHUB_OUTPUT
+
+      - name: Monitor Rolling Update
+        run: |
+          echo "Monitoring rolling update for VMSS: ${{ steps.vmss.outputs.vmss_name }}"
+
+          for i in {1..60}; do
+            STATUS=$(az vmss get-instance-view \
+              --name "${{ steps.vmss.outputs.vmss_name }}" \
+              --resource-group "${{ steps.vmss.outputs.resource_group_name }}" \
+              --query "statuses[?code=='ProvisioningState/succeeded'].code" \
+              -o tsv 2>/dev/null || echo "pending")
+
+            if [ "$STATUS" == "ProvisioningState/succeeded" ]; then
+              echo "Rolling update completed successfully!"
+              break
+            fi
+
+            echo "Update in progress... (check $i/60)"
+            sleep 30
+          done
+
+      - name: Health Check
+        run: |
+          echo "Running health check..."
+          APP_URL="${{ steps.vmss.outputs.application_url }}"
+
+          for i in {1..10}; do
+            if curl -sf "${APP_URL}/health" > /dev/null; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Waiting for healthy response... (attempt $i/10)"
+            sleep 30
+          done
+
+          echo "Warning: Health check did not pass within timeout"
+          exit 1
+
+      - name: Deployment Summary
+        run: |
+          echo "## Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Drupal Ref:** ${{ github.event.client_payload.drupal_ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "**VMSS:** ${{ steps.vmss.outputs.vmss_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Application URL:** ${{ steps.vmss.outputs.application_url }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "To deploy to production, run deploy-production.yml with:" >> $GITHUB_STEP_SUMMARY
-          echo "  image_version: ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "Rolling update completed. Verify the application at the URL above." >> $GITHUB_STEP_SUMMARY
