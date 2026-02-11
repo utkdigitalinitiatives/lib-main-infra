@@ -6,7 +6,7 @@
 #   - Rocky Linux 9 from Azure Compute Gallery or marketplace
 #   - Optional public IP for direct access during testing
 #   - System-assigned managed identity for Azure resource access
-#   - Named with PR number for isolation (drupal-dev-pr-{number}-vm)
+#   - Named with environment and PR number for isolation (drupal-{env}-pr-{number}-vm)
 #
 # Lifecycle:
 #   Created for each PR, destroyed after validation or when PR closes.
@@ -27,7 +27,7 @@ terraform {
 locals {
   # Use PR number in name if provided, otherwise use environment
   name_suffix = var.pr_number != null ? "pr-${var.pr_number}" : var.environment
-  name_prefix = "drupal-dev-${local.name_suffix}"
+  name_prefix = "drupal-${var.environment}-${local.name_suffix}"
   common_tags = merge(var.tags, {
     Environment = var.environment
     PRNumber    = var.pr_number
