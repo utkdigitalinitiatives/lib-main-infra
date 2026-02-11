@@ -25,6 +25,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.57"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   # Backend configuration for Terraform state
@@ -35,6 +39,12 @@ terraform {
 
 provider "azurerm" {
   features {}
+}
+
+# Random hash salt for Drupal security
+resource "random_password" "drupal_hash_salt" {
+  length  = 64
+  special = true
 }
 
 # Data source: Get image version from Azure Compute Gallery
@@ -80,6 +90,7 @@ module "test_vm" {
     db_name         = var.db_name
     db_user         = var.db_admin_username
     db_password     = var.db_admin_password
+    hash_salt       = random_password.drupal_hash_salt.result
     storage_account = var.devtest_storage_account
     storage_key     = var.devtest_storage_key
   })
