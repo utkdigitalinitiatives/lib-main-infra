@@ -37,6 +37,7 @@ locals {
     Environment = local.environment
     ManagedBy   = "terraform"
     Project     = "lib-main"
+    CostCenter  = "E016010"
   }
 }
 

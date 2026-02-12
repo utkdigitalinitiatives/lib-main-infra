@@ -66,6 +66,7 @@ resource "azurerm_resource_group" "test" {
     ManagedBy   = "terraform"
     Project     = "lib-main"
     Ephemeral   = var.pr_number != null ? "true" : "false"
+    CostCenter  = "E016010"
   }
 }
 
@@ -101,5 +102,6 @@ module "test_vm" {
     Project      = "lib-main"
     Stage        = "test-validation"
     ImageVersion = var.image_version
+    CostCenter   = "E016010"
   }
 }

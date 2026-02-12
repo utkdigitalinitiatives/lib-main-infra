@@ -49,6 +49,7 @@ locals {
     ManagedBy   = "terraform"
     Application = "drupal"
     Project     = "lib-main"
+    CostCenter  = "E016010"
   }
 }
 
