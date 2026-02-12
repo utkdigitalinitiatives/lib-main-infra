@@ -96,8 +96,8 @@ runcmd:
             Require all granted
             RewriteEngine On
             RewriteBase /
-            RewriteCond %{REQUEST_FILENAME} !-f
-            RewriteCond %{REQUEST_FILENAME} !-d
+            RewriteCond %%{REQUEST_FILENAME} !-f
+            RewriteCond %%{REQUEST_FILENAME} !-d
             RewriteRule ^ index.php [L]
         </Directory>
 
@@ -126,8 +126,8 @@ runcmd:
     cat > /etc/httpd/conf.d/drupal.conf <<'REDIRECTCONF'
     <VirtualHost *:80>
         RewriteEngine On
-        RewriteCond %{REQUEST_URI} !^/health
-        RewriteRule ^(.*)$ https://%{HTTP_HOST}$1 [R=301,L]
+        RewriteCond %%{REQUEST_URI} !^/health
+        RewriteRule ^(.*)$ https://%%{HTTP_HOST}$1 [R=301,L]
 
         <Location /health>
             SetHandler none
