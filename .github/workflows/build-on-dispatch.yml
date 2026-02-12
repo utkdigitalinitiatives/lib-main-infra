@@ -290,7 +290,7 @@ jobs:
           echo "Testing health endpoint on $DEV_IP..."
 
           for i in {1..30}; do
-            if curl -sf http://${DEV_IP}/health; then
+            if curl -ksf https://${DEV_IP}/health; then
               echo "Health check passed!"
               exit 0
             fi
@@ -305,7 +305,7 @@ jobs:
         run: |
           echo "## Dev Environment Deployed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Dev Site URL:** http://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dev Site URL:** https://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
           echo "**PR Number:** ${{ needs.build-image.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -448,7 +448,7 @@ jobs:
           echo "Testing health endpoint on $TEST_IP..."
 
           for i in {1..30}; do
-            if curl -sf http://${TEST_IP}/health; then
+            if curl -ksf https://${TEST_IP}/health; then
               echo "Health check passed!"
               exit 0
             fi
