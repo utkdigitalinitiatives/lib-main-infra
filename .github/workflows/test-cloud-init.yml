@@ -211,17 +211,13 @@ jobs:
           echo "Waiting for VM to boot and cloud-init to complete..."
 
           for i in {1..30}; do
-            if curl -sf http://${VM_IP}/health; then
-              echo "Health check passed (HTTP)!"
+            if curl -ksf https://${VM_IP}/health; then
+              echo "Health check passed (HTTPS)!"
               break
             fi
             echo "Waiting for VM... (attempt $i/30)"
             sleep 10
           done
-
-          echo ""
-          echo "Testing HTTPS (self-signed cert)..."
-          curl -ksvI https://${VM_IP}/ 2>&1 | head -20 || true
 
       - name: Summary
         if: "!inputs.destroy_only"
