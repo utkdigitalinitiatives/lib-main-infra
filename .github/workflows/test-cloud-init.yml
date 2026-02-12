@@ -1,0 +1,248 @@
+# ------------------------------------------------------------------------------
+# Test Cloud-Init Workflow
+# ------------------------------------------------------------------------------
+# Lightweight manual workflow for testing cloud-init changes on dev/test VMs
+# without triggering a full image build. Uses an existing image from the
+# gallery and deploys an ephemeral VM.
+#
+# This workflow is NOT part of the normal CI/CD pipeline. It exists solely
+# for quick iteration on cloud-init, Apache config, TLS, and other boot-time
+# configuration changes.
+#
+# Usage:
+#   1. Go to Actions > "Test Cloud-Init" > Run workflow
+#   2. Provide an existing image version (e.g., 0.0.3)
+#   3. Optionally set a PR number for resource naming (default: 9999)
+#   4. Choose environment (dev or test)
+#   5. When done testing, re-run with destroy_only=true to clean up
+# ------------------------------------------------------------------------------
+
+name: Test Cloud-Init
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_version:
+        description: 'Existing image version from gallery (e.g., 0.0.3)'
+        required: true
+        type: string
+      pr_number:
+        description: 'PR number for resource naming (arbitrary, default: 9999)'
+        required: false
+        default: '9999'
+        type: string
+      environment:
+        description: 'Which environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - test
+      sync_database:
+        description: 'Sync production DB to devtest before deploy'
+        required: false
+        default: true
+        type: boolean
+      destroy_only:
+        description: 'Only destroy resources (skip deploy)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  TF_VAR_admin_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+  TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+  TF_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
+  TF_VAR_gallery_resource_group_name: ${{ vars.GALLERY_RESOURCE_GROUP }}
+  TF_VAR_subnet_id: ${{ vars.SUBNET_ID }}
+  TF_VAR_location: ${{ vars.LOCATION }}
+  TF_VAR_devtest_db_host: ${{ vars.DEVTEST_DB_HOST }}
+  TF_VAR_devtest_storage_account: ${{ vars.DEVTEST_STORAGE_ACCOUNT }}
+
+jobs:
+  deploy-vm:
+    name: ${{ inputs.destroy_only && 'Destroy' || 'Deploy' }} ${{ inputs.environment }} VM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Start PostgreSQL if stopped
+        if: inputs.sync_database && !inputs.destroy_only
+        run: |
+          SERVER_NAME="drupal-devtest-psql"
+          RG="lib-main-devtest-rg"
+
+          STATE=$(az postgres flexible-server show \
+            --name "$SERVER_NAME" --resource-group "$RG" \
+            --query "state" -o tsv)
+          echo "Current PostgreSQL state: $STATE"
+
+          if [ "$STATE" != "Ready" ]; then
+            echo "Starting PostgreSQL server..."
+            az postgres flexible-server start \
+              --name "$SERVER_NAME" --resource-group "$RG"
+
+            for i in {1..60}; do
+              STATE=$(az postgres flexible-server show \
+                --name "$SERVER_NAME" --resource-group "$RG" \
+                --query "state" -o tsv)
+              if [ "$STATE" == "Ready" ]; then
+                echo "PostgreSQL is ready (attempt $i)"
+                break
+              fi
+              echo "Waiting for PostgreSQL... (attempt $i/60, state: $STATE)"
+              sleep 10
+            done
+
+            if [ "$STATE" != "Ready" ]; then
+              echo "::error::PostgreSQL failed to start after 10 minutes"
+              exit 1
+            fi
+          fi
+
+      - name: Sync production database to devtest
+        if: inputs.sync_database && !inputs.destroy_only
+        env:
+          PGSSLMODE: require
+          PROD_HOST: drupal-production-psql.postgres.database.azure.com
+          DEVTEST_HOST: ${{ vars.DEVTEST_DB_HOST }}
+          DB_USER: drupaladmin
+          DB_PASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
+          DB_NAME: drupal
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+          echo "Dumping production database..."
+          PGPASSWORD="$DB_PASSWORD" pg_dump \
+            -h "$PROD_HOST" -U "$DB_USER" -d "$DB_NAME" \
+            --format=custom --no-owner --no-acl \
+            -f /tmp/production.dump
+
+          echo "Terminating existing connections..."
+          PGPASSWORD="$DB_PASSWORD" psql \
+            -h "$DEVTEST_HOST" -U "$DB_USER" -d postgres \
+            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB_NAME' AND pid <> pg_backend_pid();" || true
+
+          echo "Dropping and recreating devtest database..."
+          PGPASSWORD="$DB_PASSWORD" psql \
+            -h "$DEVTEST_HOST" -U "$DB_USER" -d postgres \
+            -c "DROP DATABASE IF EXISTS $DB_NAME;"
+          PGPASSWORD="$DB_PASSWORD" psql \
+            -h "$DEVTEST_HOST" -U "$DB_USER" -d postgres \
+            -c "CREATE DATABASE $DB_NAME;"
+
+          echo "Restoring production dump to devtest..."
+          PGPASSWORD="$DB_PASSWORD" pg_restore \
+            -h "$DEVTEST_HOST" -U "$DB_USER" -d "$DB_NAME" \
+            --no-owner --no-acl \
+            /tmp/production.dump
+
+          echo "Ensuring pg_trgm extension exists..."
+          PGPASSWORD="$DB_PASSWORD" psql \
+            -h "$DEVTEST_HOST" -U "$DB_USER" -d "$DB_NAME" \
+            -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
+          echo "Database sync complete"
+          rm -f /tmp/production.dump
+
+      - name: Get devtest storage key
+        run: |
+          KEY=$(az storage account keys list \
+            --account-name "${{ vars.DEVTEST_STORAGE_ACCOUNT }}" \
+            --resource-group lib-main-devtest-rg \
+            --query "[0].value" -o tsv)
+          echo "::add-mask::$KEY"
+          echo "TF_VAR_devtest_storage_key=$KEY" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        working-directory: environments/${{ inputs.environment }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=${{ inputs.environment }}/pr-${{ inputs.pr_number }}/terraform.tfstate"
+
+      - name: Terraform Destroy
+        if: inputs.destroy_only
+        working-directory: environments/${{ inputs.environment }}
+        run: |
+          terraform destroy -auto-approve \
+            -var="pr_number=${{ inputs.pr_number }}" \
+            -var="image_version=${{ inputs.image_version }}"
+
+      - name: Terraform Apply
+        if: "!inputs.destroy_only"
+        working-directory: environments/${{ inputs.environment }}
+        run: |
+          terraform apply -auto-approve \
+            -var="pr_number=${{ inputs.pr_number }}" \
+            -var="image_version=${{ inputs.image_version }}"
+
+      - name: Get VM IP
+        if: "!inputs.destroy_only"
+        id: outputs
+        working-directory: environments/${{ inputs.environment }}
+        run: |
+          echo "public_ip=$(terraform output -raw public_ip_address)" >> $GITHUB_OUTPUT
+
+      - name: Health Check
+        if: "!inputs.destroy_only"
+        run: |
+          VM_IP="${{ steps.outputs.outputs.public_ip }}"
+          echo "Waiting for VM to boot and cloud-init to complete..."
+
+          for i in {1..30}; do
+            if curl -sf http://${VM_IP}/health; then
+              echo "Health check passed (HTTP)!"
+              break
+            fi
+            echo "Waiting for VM... (attempt $i/30)"
+            sleep 10
+          done
+
+          echo ""
+          echo "Testing HTTPS (self-signed cert)..."
+          curl -ksvI https://${VM_IP}/ 2>&1 | head -20 || true
+
+      - name: Summary
+        if: "!inputs.destroy_only"
+        run: |
+          echo "## Test Cloud-Init Deploy" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**VM IP:** ${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Version:** ${{ inputs.image_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**PR Number:** ${{ inputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**HTTP:** http://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "**HTTPS:** https://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Remember to clean up: re-run this workflow with \`destroy_only=true\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Destroy Summary
+        if: inputs.destroy_only
+        run: |
+          echo "## Test Cloud-Init Cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**PR Number:** ${{ inputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "Resources destroyed." >> $GITHUB_STEP_SUMMARY
