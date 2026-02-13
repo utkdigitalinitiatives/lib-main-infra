@@ -40,7 +40,7 @@ variable "schedule_week_days" {
 variable "schedule_start_time" {
   description = "Start time for the schedule (RFC3339 format, date portion ignored for recurring)"
   type        = string
-  default     = "2026-03-01T22:00:00-05:00"
+  default     = "2026-02-13T22:00:00-05:00"
 }
 
 variable "tags" {
