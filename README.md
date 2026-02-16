@@ -100,8 +100,26 @@ terraform plan -var="subscription_id=..." -var="admin_ssh_public_key=..." ...
 |----------|---------|---------|
 | `base-image-build.yml` | Monthly / Manual / Base file changes | Build base image with system packages |
 | `build-on-dispatch.yml` | `repository_dispatch` from lib-main | Build app image + run PR workflow |
-| `deploy-production.yml` | Manual | Rolling update to production |
-| `cleanup-pr.yml` | PR closed / `drupal-pr-closed` dispatch | Destroy ephemeral resources |
+| `deploy-production.yml` | Manual | Rolling update to production (rollback/emergency) |
+| `cleanup-pr.yml` | PR closed / `drupal-pr-closed` dispatch | Destroy ephemeral dev resources |
+| `test-cloud-init.yml` | Manual | Test cloud-init changes on dev VMs |
+
+### PR Pipeline
+
+When a PR is opened or updated in [lib-main](https://github.com/utkdigitalinitiatives/lib-main), the following pipeline runs automatically:
+
+```
+build-image → prepare-database → deploy-dev → dev-review → production-ready → deploy-production
+```
+
+1. **Build Image** — Packer builds a new image with the PR's Drupal code
+2. **Prepare Database** — Production database is synced to the devtest PostgreSQL instance
+3. **Deploy Dev** — Ephemeral VM deployed with the new image for validation
+4. **Dev Review** — Manual approval gate
+5. **Production Ready** — Final approval gate
+6. **Deploy to Production** — Rolling update to the production VMSS
+
+When the PR is closed, `cleanup-pr.yml` destroys the ephemeral dev resources.
 
 ## Azure Resources
 
