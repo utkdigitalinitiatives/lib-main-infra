@@ -1,23 +1,23 @@
 # ------------------------------------------------------------------------------
 # Dev Environment
 # ------------------------------------------------------------------------------
-# PR validation environment. Creates ephemeral resources:
-#   - Resource Group: lib-main-dev-pr-{number}-rg
+# Shared dev environment for dev-branch validation. Creates:
+#   - Resource Group: lib-main-dev-rg (shared, not per-PR)
 #   - Dev VM: Single instance for validation
 #
 # Database is provided by the permanent devtest PostgreSQL instance,
 # synced from production by the CI/CD workflow before deployment.
 #
 # Workflow:
-#   1. lib-main repo pushes code → triggers repository_dispatch
-#   2. Packer builds image with PR code
-#   3. Production DB synced to devtest PostgreSQL
-#   4. Dev environment deploys image for validation
-#   5. On approval, image proceeds to production
-#   6. On PR close, cleanup workflow destroys dev resources
+#   1. Developer merges PR to dev branch in lib-main
+#   2. Push to dev triggers repository_dispatch (drupal-dev-merge)
+#   3. Packer builds image with dev branch code
+#   4. Production DB synced to devtest PostgreSQL
+#   5. Dev VM deployed with new image for validation
+#   6. After dev-review approval, developer merges dev → main
+#   7. Push to main triggers production deploy and dev VM cleanup
 #
-# State isolation:
-#   Each PR gets its own state file: dev/pr-{number}/terraform.tfstate
+# State: dev/terraform.tfstate (single shared state)
 # ------------------------------------------------------------------------------
 
 terraform {
@@ -36,7 +36,7 @@ terraform {
 
   # Backend configuration for Terraform state
   # Uses partial configuration - remaining values passed via -backend-config
-  # State key includes PR number for isolation: dev/pr-{number}/terraform.tfstate
+  # State key: dev/terraform.tfstate (shared across dev deploys)
   backend "azurerm" {}
 }
 
@@ -58,7 +58,7 @@ data "azurerm_shared_image_version" "drupal" {
   resource_group_name = var.gallery_resource_group_name
 }
 
-# Resource group for dev resources (ephemeral per PR)
+# Resource group for dev resources (shared or per-PR)
 resource "azurerm_resource_group" "dev" {
   name     = var.pr_number != null ? "lib-main-dev-pr-${var.pr_number}-rg" : "lib-main-dev-rg"
   location = var.location
@@ -73,7 +73,7 @@ resource "azurerm_resource_group" "dev" {
   }
 }
 
-# Dev VM (first validation stage in PR workflow)
+# Dev VM (validation stage)
 module "dev_vm" {
   source = "../../modules/drupal-dev-vm"
 

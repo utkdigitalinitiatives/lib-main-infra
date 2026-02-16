@@ -1,20 +1,19 @@
 name: Build on Dispatch
 
 # Triggered by repository_dispatch from lib-main repository
-# Event type: drupal-pr (PR opened/updated in lib-main)
+# Event type: drupal-dev-merge (push to dev branch in lib-main)
 #
 # Payload (client_payload):
 #   - drupal_repo: Git repository URL
-#   - drupal_ref: Branch/tag/SHA to checkout
+#   - drupal_ref: Branch to checkout (dev)
 #   - drupal_sha: Full commit SHA
-#   - pr_number: PR number
 
 on:
   repository_dispatch:
-    types: [drupal-pr]
+    types: [drupal-dev-merge]
 
 concurrency:
-  group: pr-${{ github.event.client_payload.pr_number || github.run_id }}
+  group: dev-merge
   cancel-in-progress: true
 
 env:
@@ -30,11 +29,6 @@ env:
   TF_VAR_location: ${{ vars.LOCATION }}
   TF_VAR_devtest_db_host: ${{ vars.DEVTEST_DB_HOST }}
   TF_VAR_devtest_storage_account: ${{ vars.DEVTEST_STORAGE_ACCOUNT }}
-  TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  TF_VAR_use_gallery_image: "true"
-  TF_VAR_lb_dns_label: ${{ vars.LB_DNS_LABEL }}
-  TF_VAR_enable_vmss_blob_access: "true"
-  TF_VAR_drupal_site_uuid: ${{ vars.DRUPAL_SITE_UUID }}
 
 jobs:
   # Build image from lib-main codebase
@@ -43,7 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_version: ${{ steps.version.outputs.version }}
-      pr_number: ${{ github.event.client_payload.pr_number }}
 
     steps:
       - name: Checkout infrastructure code
@@ -64,13 +57,8 @@ jobs:
       - name: Generate version
         id: version
         run: |
-          PR_NUM="${{ github.event.client_payload.pr_number }}"
-          if [ -z "$PR_NUM" ]; then
-            echo "::error::Missing pr_number in payload"
-            exit 1
-          fi
-          echo "version=0.0.${PR_NUM}" >> $GITHUB_OUTPUT
-          echo "Building PR image: 0.0.${PR_NUM}"
+          echo "version=0.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "Building image version: 0.0.${{ github.run_number }}"
 
       - name: Setup Packer
         uses: hashicorp/setup-packer@main
@@ -137,7 +125,6 @@ jobs:
   prepare-database:
     name: Prepare Database
     needs: build-image
-    if: github.event.action == 'drupal-pr'
     runs-on: ubuntu-latest
     concurrency:
       group: devtest-database
@@ -229,11 +216,10 @@ jobs:
           echo "Database sync complete"
           rm -f /tmp/production.dump
 
-  # Deploy Dev Environment (PR builds only)
+  # Deploy Dev Environment
   deploy-dev:
     name: Deploy Dev
     needs: [build-image, prepare-database]
-    if: github.event.action == 'drupal-pr'
     runs-on: ubuntu-latest
     environment: dev
     outputs:
@@ -269,13 +255,12 @@ jobs:
             -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
             -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=tfstate" \
-            -backend-config="key=dev/pr-${{ needs.build-image.outputs.pr_number }}/terraform.tfstate"
+            -backend-config="key=dev/terraform.tfstate"
 
       - name: Terraform Apply
         working-directory: environments/dev
         run: |
           terraform apply -auto-approve \
-            -var="pr_number=${{ needs.build-image.outputs.pr_number }}" \
             -var="image_version=${{ needs.build-image.outputs.image_version }}"
 
       - name: Get Outputs
@@ -307,15 +292,14 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Dev Site URL:** https://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**PR Number:** ${{ needs.build-image.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Drupal SHA:** ${{ github.event.client_payload.drupal_sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Waiting for manual approval before proceeding to production." >> $GITHUB_STEP_SUMMARY
+          echo "Waiting for manual approval. After approval, create a PR from dev to main to deploy to production." >> $GITHUB_STEP_SUMMARY
 
   # Dev Review Gate (human approval required)
   dev-review:
     name: Dev Review
     needs: [build-image, deploy-dev]
-    if: github.event.action == 'drupal-pr'
     runs-on: ubuntu-latest
     environment: dev-review
 
@@ -324,120 +308,4 @@ jobs:
         run: |
           echo "## Dev Review Approved" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Dev environment validated. Proceeding to production approval." >> $GITHUB_STEP_SUMMARY
-
-  # Production Ready (requires approval)
-  production-ready:
-    name: Production Ready
-    needs: [build-image, dev-review]
-    if: github.event.action == 'drupal-pr'
-    runs-on: ubuntu-latest
-    environment: production-approval
-
-    steps:
-      - name: Production Ready Summary
-        run: |
-          echo "## Production Ready" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This image has been validated in the dev environment." >> $GITHUB_STEP_SUMMARY
-          echo "Deploying to production..." >> $GITHUB_STEP_SUMMARY
-
-  # Deploy tested image to production
-  deploy-production:
-    name: Deploy to Production
-    needs: [build-image, production-ready]
-    if: github.event.action == 'drupal-pr'
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Azure CLI Login
-        uses: azure/login@v2
-        with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
-      - name: Terraform Init
-        working-directory: environments/production
-        run: |
-          terraform init \
-            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=production/terraform.tfstate"
-
-      - name: Terraform Plan
-        working-directory: environments/production
-        run: |
-          terraform plan \
-            -var="image_version=${{ needs.build-image.outputs.image_version }}" \
-            -out=tfplan
-
-      - name: Terraform Apply (Rolling Update)
-        working-directory: environments/production
-        run: terraform apply -auto-approve tfplan
-
-      - name: Get VMSS Details
-        id: vmss
-        working-directory: environments/production
-        run: |
-          echo "vmss_name=$(terraform output -raw vmss_name)" >> $GITHUB_OUTPUT
-          echo "vmss_id=$(terraform output -raw vmss_id)" >> $GITHUB_OUTPUT
-          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
-          echo "application_url=$(terraform output -raw application_url)" >> $GITHUB_OUTPUT
-
-      - name: Monitor Rolling Update
-        run: |
-          echo "Monitoring rolling update for VMSS: ${{ steps.vmss.outputs.vmss_name }}"
-
-          for i in {1..60}; do
-            STATUS=$(az vmss get-instance-view \
-              --name "${{ steps.vmss.outputs.vmss_name }}" \
-              --resource-group "${{ steps.vmss.outputs.resource_group_name }}" \
-              --query "statuses[?code=='ProvisioningState/succeeded'].code" \
-              -o tsv 2>/dev/null || echo "pending")
-
-            if [ "$STATUS" == "ProvisioningState/succeeded" ]; then
-              echo "Rolling update completed successfully!"
-              break
-            fi
-
-            echo "Update in progress... (check $i/60)"
-            sleep 30
-          done
-
-      - name: Health Check
-        run: |
-          echo "Running health check..."
-          APP_URL="${{ steps.vmss.outputs.application_url }}"
-
-          for i in {1..10}; do
-            if curl -sf "${APP_URL}/health" > /dev/null; then
-              echo "Health check passed!"
-              exit 0
-            fi
-            echo "Waiting for healthy response... (attempt $i/10)"
-            sleep 30
-          done
-
-          echo "Warning: Health check did not pass within timeout"
-          exit 1
-
-      - name: Deployment Summary
-        run: |
-          echo "## Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**VMSS:** ${{ steps.vmss.outputs.vmss_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Application URL:** ${{ steps.vmss.outputs.application_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Rolling update completed. Verify the application at the URL above." >> $GITHUB_STEP_SUMMARY
+          echo "Dev environment validated. Create a PR from dev to main to deploy to production." >> $GITHUB_STEP_SUMMARY

@@ -1,16 +1,16 @@
 # ------------------------------------------------------------------------------
 # Drupal Dev VM Module
 # ------------------------------------------------------------------------------
-# Creates an ephemeral Linux VM for PR validation and testing:
-#   - Single VM (not VMSS) for dev/test workflows
+# Creates a Linux VM for dev-branch validation and testing:
+#   - Single VM (not VMSS) for dev workflows
 #   - Rocky Linux 9 from Azure Compute Gallery or marketplace
 #   - Optional public IP for direct access during testing
 #   - System-assigned managed identity for Azure resource access
-#   - Named with environment and PR number for isolation (drupal-{env}-pr-{number}-vm)
+#   - Named as drupal-{env}-vm (shared) or drupal-{env}-pr-{number}-vm (per-PR)
 #
 # Lifecycle:
-#   Created for each PR, destroyed after validation or when PR closes.
-#   Used in both dev (first stage) and test (second stage) environments.
+#   Shared dev VM: created on merge to dev branch, destroyed after production deploy.
+#   Per-PR VM (optional): created per PR for isolated testing.
 # ------------------------------------------------------------------------------
 
 terraform {
@@ -25,9 +25,7 @@ terraform {
 }
 
 locals {
-  # Use PR number in name if provided, otherwise use environment
-  name_suffix = var.pr_number != null ? "pr-${var.pr_number}" : var.environment
-  name_prefix = "drupal-${var.environment}-${local.name_suffix}"
+  name_prefix = var.pr_number != null ? "drupal-${var.environment}-pr-${var.pr_number}" : "drupal-${var.environment}"
   common_tags = merge(var.tags, {
     Environment = var.environment
     PRNumber    = var.pr_number

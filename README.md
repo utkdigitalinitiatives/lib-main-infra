@@ -15,10 +15,10 @@ This repository contains the Azure infrastructure for running a Drupal 11 applic
 ```
 lib-main-infra/
 ├── .github/workflows/
-│   ├── base-image-build.yml    # Monthly base image build
-│   ├── build-on-dispatch.yml   # Triggered by lib-main repo
-│   ├── deploy-production.yml   # Production rolling update
-│   └── cleanup-pr.yml          # PR resource cleanup
+│   ├── base-image-build.yml        # Monthly base image build
+│   ├── build-on-dispatch.yml       # Dev merge: build image → dev VM
+│   ├── deploy-on-main-merge.yml    # Main merge: production deploy → dev cleanup
+│   ├── deploy-production.yml       # Manual production rolling update
 ├── packer/
 │   ├── drupal-base-rocky9.pkr.hcl  # Base image (system packages)
 │   ├── drupal-rocky9.pkr.hcl       # App image (Drupal code)
@@ -27,7 +27,7 @@ lib-main-infra/
 ├── environments/
 │   ├── production/                  # Production environment
 │   ├── devtest/                     # Permanent shared PostgreSQL + Automation
-│   └── dev/                         # Ephemeral PR dev stage
+│   └── dev/                         # Shared dev validation
 └── bootstrap/                       # Azure setup scripts
 ```
 
@@ -35,10 +35,11 @@ lib-main-infra/
 
 This infrastructure repo works with the [lib-main](https://github.com/utkdigitalinitiatives/lib-main) Drupal codebase:
 
-1. Developers push code to lib-main
-2. lib-main's workflow sends `repository_dispatch` to this repo
-3. This repo builds a Packer image with the lib-main code
-4. The image is deployed through dev → production
+1. Developers create feature branches, open PRs to the `dev` branch
+2. When a PR is merged to `dev`, lib-main sends a `drupal-dev-merge` dispatch to this repo
+3. This repo builds a Packer image and deploys a dev VM for validation
+4. When `dev` is merged to `main`, lib-main sends a `drupal-main-merge` dispatch
+5. This repo deploys the latest image to production and cleans up the dev VM
 
 ## Quick Start
 
@@ -99,27 +100,33 @@ terraform plan -var="subscription_id=..." -var="admin_ssh_public_key=..." ...
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `base-image-build.yml` | Monthly / Manual / Base file changes | Build base image with system packages |
-| `build-on-dispatch.yml` | `repository_dispatch` from lib-main | Build app image + run PR workflow |
+| `build-on-dispatch.yml` | `drupal-dev-merge` dispatch from lib-main | Build image → sync DB → deploy dev VM → dev-review |
+| `deploy-on-main-merge.yml` | `drupal-main-merge` dispatch / Manual | Production deploy → dev VM cleanup |
 | `deploy-production.yml` | Manual | Rolling update to production (rollback/emergency) |
-| `cleanup-pr.yml` | PR closed / `drupal-pr-closed` dispatch | Destroy ephemeral dev resources |
 | `test-cloud-init.yml` | Manual | Test cloud-init changes on dev VMs |
 
-### PR Pipeline
+### Dev → Production Pipeline
 
-When a PR is opened or updated in [lib-main](https://github.com/utkdigitalinitiatives/lib-main), the following pipeline runs automatically:
+When code is merged to the `dev` branch in [lib-main](https://github.com/utkdigitalinitiatives/lib-main):
 
 ```
-build-image → prepare-database → deploy-dev → dev-review → production-ready → deploy-production
+build-image → prepare-database → deploy-dev → dev-review
 ```
 
-1. **Build Image** — Packer builds a new image with the PR's Drupal code
+1. **Build Image** — Packer builds a new image (version `0.0.{RUN_NUMBER}`)
 2. **Prepare Database** — Production database is synced to the devtest PostgreSQL instance
-3. **Deploy Dev** — Ephemeral VM deployed with the new image for validation
+3. **Deploy Dev** — Shared dev VM deployed with the new image for validation
 4. **Dev Review** — Manual approval gate
-5. **Production Ready** — Final approval gate
-6. **Deploy to Production** — Rolling update to the production VMSS
 
-When the PR is closed, `cleanup-pr.yml` destroys the ephemeral dev resources.
+When `dev` is merged to `main`:
+
+```
+get-image-version → deploy-production (approval gate) → cleanup-dev
+```
+
+1. **Get Image Version** — Queries gallery for latest image
+2. **Deploy to Production** — Rolling update to the production VMSS (requires approval)
+3. **Cleanup Dev** — Destroys the shared dev VM and resources
 
 ## Azure Resources
 
@@ -129,7 +136,7 @@ When the PR is closed, `cleanup-pr.yml` destroys the ephemeral dev resources.
 | `lib-main-tfstate-rg` | Terraform state storage |
 | `lib-main-production-rg` | Production infrastructure |
 | `lib-main-devtest-rg` | Permanent shared PostgreSQL + Automation |
-| `lib-main-dev-pr-{N}-rg` | Ephemeral PR dev resources |
+| `lib-main-dev-rg` | Shared dev validation resources |
 
 ## License
 

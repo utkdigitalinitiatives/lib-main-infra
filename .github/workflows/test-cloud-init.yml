@@ -3,7 +3,7 @@
 # ------------------------------------------------------------------------------
 # Lightweight manual workflow for testing cloud-init changes on dev VMs
 # without triggering a full image build. Uses an existing image from the
-# gallery and deploys an ephemeral VM.
+# gallery and deploys to the shared dev environment.
 #
 # This workflow is NOT part of the normal CI/CD pipeline. It exists solely
 # for quick iteration on cloud-init, Apache config, TLS, and other boot-time
@@ -11,10 +11,8 @@
 #
 # Usage:
 #   1. Go to Actions > "Test Cloud-Init" > Run workflow
-#   2. Provide an existing image version (e.g., 0.0.3)
-#   3. Optionally set a PR number for resource naming (default: 9999)
-#   4. Choose environment (dev)
-#   5. When done testing, re-run with destroy_only=true to clean up
+#   2. Provide an existing image version (e.g., 0.0.42)
+#   3. When done testing, re-run with destroy_only=true to clean up
 # ------------------------------------------------------------------------------
 
 name: Test Cloud-Init
@@ -23,13 +21,8 @@ on:
   workflow_dispatch:
     inputs:
       image_version:
-        description: 'Existing image version from gallery (e.g., 0.0.3)'
+        description: 'Existing image version from gallery (e.g., 0.0.42)'
         required: true
-        type: string
-      pr_number:
-        description: 'PR number for resource naming (arbitrary, default: 9999)'
-        required: false
-        default: '9999'
         type: string
       environment:
         description: 'Which environment to deploy'
@@ -178,14 +171,13 @@ jobs:
             -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
             -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=tfstate" \
-            -backend-config="key=${{ inputs.environment }}/pr-${{ inputs.pr_number }}/terraform.tfstate"
+            -backend-config="key=${{ inputs.environment }}/terraform.tfstate"
 
       - name: Terraform Destroy
         if: inputs.destroy_only
         working-directory: environments/${{ inputs.environment }}
         run: |
           terraform destroy -auto-approve \
-            -var="pr_number=${{ inputs.pr_number }}" \
             -var="image_version=${{ inputs.image_version }}"
 
       - name: Terraform Apply
@@ -193,7 +185,6 @@ jobs:
         working-directory: environments/${{ inputs.environment }}
         run: |
           terraform apply -auto-approve \
-            -var="pr_number=${{ inputs.pr_number }}" \
             -var="image_version=${{ inputs.image_version }}"
 
       - name: Get VM IP
@@ -226,7 +217,6 @@ jobs:
           echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "**VM IP:** ${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "**Image Version:** ${{ inputs.image_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**PR Number:** ${{ inputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**HTTP:** http://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "**HTTPS:** https://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
@@ -239,5 +229,4 @@ jobs:
           echo "## Test Cloud-Init Cleanup" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**PR Number:** ${{ inputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
           echo "Resources destroyed." >> $GITHUB_STEP_SUMMARY

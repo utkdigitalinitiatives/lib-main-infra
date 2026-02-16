@@ -1,0 +1,244 @@
+name: Deploy on Main Merge
+
+# Triggered by repository_dispatch from lib-main repository
+# Event type: drupal-main-merge (push to main branch in lib-main)
+#
+# Payload (client_payload):
+#   - drupal_sha: Full commit SHA (for audit trail)
+#
+# Also supports manual trigger for cleanup-only or manual deploys.
+
+on:
+  repository_dispatch:
+    types: [drupal-main-merge]
+  workflow_dispatch:
+    inputs:
+      cleanup_only:
+        description: 'Only destroy dev VM, skip production deploy'
+        required: false
+        default: false
+        type: boolean
+      image_version:
+        description: 'Override image version (optional, queries gallery if empty)'
+        required: false
+        type: string
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+jobs:
+  # Query Azure Compute Gallery for the latest drupal-rocky-linux-9 image
+  get-image-version:
+    name: Get Image Version
+    if: ${{ github.event_name == 'repository_dispatch' || !inputs.cleanup_only }}
+    runs-on: ubuntu-latest
+    outputs:
+      image_version: ${{ steps.version.outputs.image_version }}
+
+    steps:
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Get latest image version
+        id: version
+        run: |
+          # Use manual override if provided
+          if [ -n "${{ inputs.image_version }}" ]; then
+            echo "image_version=${{ inputs.image_version }}" >> $GITHUB_OUTPUT
+            echo "Using manual image version: ${{ inputs.image_version }}"
+            exit 0
+          fi
+
+          echo "Querying Azure Compute Gallery for latest image..."
+          VERSION=$(az sig image-version list \
+            --gallery-name ${{ vars.GALLERY_NAME }} \
+            --gallery-image-definition drupal-rocky-linux-9 \
+            --resource-group ${{ vars.GALLERY_RESOURCE_GROUP }} \
+            --query "sort_by([], &publishingProfile.publishedDate)[-1].name" -o tsv)
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::No drupal-rocky-linux-9 image found in gallery"
+            exit 1
+          fi
+
+          echo "image_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Latest image version: $VERSION"
+
+  # Deploy to production VMSS
+  deploy-production:
+    name: Deploy to Production
+    needs: get-image-version
+    if: ${{ github.event_name == 'repository_dispatch' || !inputs.cleanup_only }}
+    runs-on: ubuntu-latest
+    environment: production-approval
+    env:
+      TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_location: ${{ vars.LOCATION }}
+      TF_VAR_use_gallery_image: "true"
+      TF_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
+      TF_VAR_gallery_resource_group_name: ${{ vars.GALLERY_RESOURCE_GROUP }}
+      TF_VAR_lb_dns_label: ${{ vars.LB_DNS_LABEL }}
+      TF_VAR_admin_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+      TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+      TF_VAR_enable_vmss_blob_access: "true"
+      TF_VAR_drupal_site_uuid: ${{ vars.DRUPAL_SITE_UUID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: environments/production
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=production/terraform.tfstate"
+
+      - name: Terraform Plan
+        working-directory: environments/production
+        run: |
+          terraform plan \
+            -var="image_version=${{ needs.get-image-version.outputs.image_version }}" \
+            -out=tfplan
+
+      - name: Terraform Apply (Rolling Update)
+        working-directory: environments/production
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get VMSS Details
+        id: vmss
+        working-directory: environments/production
+        run: |
+          echo "vmss_name=$(terraform output -raw vmss_name)" >> $GITHUB_OUTPUT
+          echo "vmss_id=$(terraform output -raw vmss_id)" >> $GITHUB_OUTPUT
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "application_url=$(terraform output -raw application_url)" >> $GITHUB_OUTPUT
+
+      - name: Monitor Rolling Update
+        run: |
+          echo "Monitoring rolling update for VMSS: ${{ steps.vmss.outputs.vmss_name }}"
+
+          for i in {1..60}; do
+            STATUS=$(az vmss get-instance-view \
+              --name "${{ steps.vmss.outputs.vmss_name }}" \
+              --resource-group "${{ steps.vmss.outputs.resource_group_name }}" \
+              --query "statuses[?code=='ProvisioningState/succeeded'].code" \
+              -o tsv 2>/dev/null || echo "pending")
+
+            if [ "$STATUS" == "ProvisioningState/succeeded" ]; then
+              echo "Rolling update completed successfully!"
+              break
+            fi
+
+            echo "Update in progress... (check $i/60)"
+            sleep 30
+          done
+
+      - name: Health Check
+        run: |
+          echo "Running health check..."
+          APP_URL="${{ steps.vmss.outputs.application_url }}"
+
+          for i in {1..10}; do
+            if curl -sf "${APP_URL}/health" > /dev/null; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Waiting for healthy response... (attempt $i/10)"
+            sleep 30
+          done
+
+          echo "Warning: Health check did not pass within timeout"
+          exit 1
+
+      - name: Deployment Summary
+        run: |
+          echo "## Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Version:** ${{ needs.get-image-version.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**VMSS:** ${{ steps.vmss.outputs.vmss_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Application URL:** ${{ steps.vmss.outputs.application_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Drupal SHA:** ${{ github.event.client_payload.drupal_sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Rolling update completed. Verify the application at the URL above." >> $GITHUB_STEP_SUMMARY
+
+  # Cleanup dev VM after successful production deploy
+  cleanup-dev:
+    name: Cleanup Dev VM
+    needs: deploy-production
+    if: ${{ always() && (needs.deploy-production.result == 'success' || inputs.cleanup_only) }}
+    runs-on: ubuntu-latest
+    env:
+      TF_VAR_admin_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+      TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+      TF_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
+      TF_VAR_gallery_resource_group_name: ${{ vars.GALLERY_RESOURCE_GROUP }}
+      TF_VAR_subnet_id: ${{ vars.SUBNET_ID }}
+      TF_VAR_location: ${{ vars.LOCATION }}
+      TF_VAR_devtest_db_host: ${{ vars.DEVTEST_DB_HOST }}
+      TF_VAR_devtest_storage_account: ${{ vars.DEVTEST_STORAGE_ACCOUNT }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Get devtest storage key
+        run: |
+          KEY=$(az storage account keys list \
+            --account-name "${{ vars.DEVTEST_STORAGE_ACCOUNT }}" \
+            --resource-group lib-main-devtest-rg \
+            --query "[0].value" -o tsv)
+          echo "::add-mask::$KEY"
+          echo "TF_VAR_devtest_storage_key=$KEY" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        working-directory: environments/dev
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=dev/terraform.tfstate"
+
+      - name: Terraform Destroy
+        working-directory: environments/dev
+        run: |
+          terraform destroy -auto-approve -refresh=false \
+            -var="image_version=latest"
+
+      - name: Cleanup Summary
+        run: |
+          echo "## Dev Environment Cleaned Up" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Dev VM and resources destroyed after successful production deployment." >> $GITHUB_STEP_SUMMARY
