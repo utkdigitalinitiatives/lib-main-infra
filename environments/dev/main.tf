@@ -1,9 +1,9 @@
 # ------------------------------------------------------------------------------
 # Dev Environment
 # ------------------------------------------------------------------------------
-# First stage of PR validation workflow. Creates ephemeral resources:
+# PR validation environment. Creates ephemeral resources:
 #   - Resource Group: lib-main-dev-pr-{number}-rg
-#   - Dev VM: Single instance for initial validation
+#   - Dev VM: Single instance for validation
 #
 # Database is provided by the permanent devtest PostgreSQL instance,
 # synced from production by the CI/CD workflow before deployment.
@@ -12,10 +12,9 @@
 #   1. lib-main repo pushes code → triggers repository_dispatch
 #   2. Packer builds image with PR code
 #   3. Production DB synced to devtest PostgreSQL
-#   4. Dev environment deploys image for smoke tests
-#   5. On success, dev environment is destroyed
-#   6. DB re-synced, test environment deploys for integration tests
-#   7. On PR close, cleanup workflow destroys remaining PR resources
+#   4. Dev environment deploys image for validation
+#   5. On approval, image proceeds to production
+#   6. On PR close, cleanup workflow destroys dev resources
 #
 # State isolation:
 #   Each PR gets its own state file: dev/pr-{number}/terraform.tfstate

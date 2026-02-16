@@ -309,7 +309,7 @@ jobs:
           echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
           echo "**PR Number:** ${{ needs.build-image.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Waiting for manual approval before proceeding to test environment." >> $GITHUB_STEP_SUMMARY
+          echo "Waiting for manual approval before proceeding to production." >> $GITHUB_STEP_SUMMARY
 
   # Dev Review Gate (human approval required)
   dev-review:
@@ -324,167 +324,12 @@ jobs:
         run: |
           echo "## Dev Review Approved" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Proceeding to destroy dev environment and deploy test environment." >> $GITHUB_STEP_SUMMARY
-
-  # Deploy Test Environment
-  deploy-test:
-    name: Deploy Test
-    needs: [build-image, deploy-dev, dev-review]
-    if: github.event.action == 'drupal-pr'
-    runs-on: ubuntu-latest
-    environment: test
-    concurrency:
-      group: devtest-database
-      cancel-in-progress: false
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
-      - name: Azure CLI Login
-        uses: azure/login@v2
-        with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-
-      - name: Get devtest storage key
-        run: |
-          KEY=$(az storage account keys list \
-            --account-name "${{ vars.DEVTEST_STORAGE_ACCOUNT }}" \
-            --resource-group lib-main-devtest-rg \
-            --query "[0].value" -o tsv)
-          echo "::add-mask::$KEY"
-          echo "TF_VAR_devtest_storage_key=$KEY" >> $GITHUB_ENV
-
-      # Destroy entire dev environment (RG + VM, no longer contains PostgreSQL)
-      - name: Destroy Dev Environment
-        working-directory: environments/dev
-        run: |
-          terraform init \
-            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=dev/pr-${{ needs.build-image.outputs.pr_number }}/terraform.tfstate"
-          terraform destroy -auto-approve \
-            -var="pr_number=${{ needs.build-image.outputs.pr_number }}" \
-            -var="image_version=${{ needs.build-image.outputs.image_version }}"
-
-      # Re-sync production database for test stage
-      - name: Sync production database to devtest
-        env:
-          PGSSLMODE: require
-          PROD_HOST: drupal-production-psql.postgres.database.azure.com
-          DEVTEST_HOST: ${{ vars.DEVTEST_DB_HOST }}
-          DB_USER: drupaladmin
-          DB_PASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
-          DB_NAME: drupal
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client
-
-          echo "Dumping production database..."
-          PGPASSWORD="$DB_PASSWORD" pg_dump \
-            -h "$PROD_HOST" -U "$DB_USER" -d "$DB_NAME" \
-            --format=custom --no-owner --no-acl \
-            -f /tmp/production.dump
-
-          echo "Terminating existing connections to devtest database..."
-          PGPASSWORD="$DB_PASSWORD" psql \
-            -h "$DEVTEST_HOST" -U "$DB_USER" -d postgres \
-            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB_NAME' AND pid <> pg_backend_pid();" || true
-
-          echo "Dropping and recreating devtest database..."
-          PGPASSWORD="$DB_PASSWORD" psql \
-            -h "$DEVTEST_HOST" -U "$DB_USER" -d postgres \
-            -c "DROP DATABASE IF EXISTS $DB_NAME;"
-          PGPASSWORD="$DB_PASSWORD" psql \
-            -h "$DEVTEST_HOST" -U "$DB_USER" -d postgres \
-            -c "CREATE DATABASE $DB_NAME;"
-
-          echo "Restoring production dump to devtest..."
-          PGPASSWORD="$DB_PASSWORD" pg_restore \
-            -h "$DEVTEST_HOST" -U "$DB_USER" -d "$DB_NAME" \
-            --no-owner --no-acl \
-            /tmp/production.dump
-
-          echo "Ensuring pg_trgm extension exists..."
-          PGPASSWORD="$DB_PASSWORD" psql \
-            -h "$DEVTEST_HOST" -U "$DB_USER" -d "$DB_NAME" \
-            -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-
-          echo "Database sync complete"
-          rm -f /tmp/production.dump
-
-      # Deploy Test VM
-      - name: Terraform Init (Test)
-        working-directory: environments/test
-        run: |
-          terraform init \
-            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=test/pr-${{ needs.build-image.outputs.pr_number }}/terraform.tfstate"
-
-      - name: Deploy Test VM
-        working-directory: environments/test
-        run: |
-          terraform apply -auto-approve \
-            -var="pr_number=${{ needs.build-image.outputs.pr_number }}" \
-            -var="image_version=${{ needs.build-image.outputs.image_version }}"
-
-      - name: Get Test VM IP
-        id: outputs
-        working-directory: environments/test
-        run: |
-          echo "public_ip=$(terraform output -raw public_ip_address)" >> $GITHUB_OUTPUT
-
-      - name: Run Test Validation
-        run: |
-          TEST_IP="${{ steps.outputs.outputs.public_ip }}"
-          echo "Testing health endpoint on $TEST_IP..."
-
-          for i in {1..30}; do
-            if curl -ksf https://${TEST_IP}/health; then
-              echo "Health check passed!"
-              exit 0
-            fi
-            echo "Waiting for VM... (attempt $i/30)"
-            sleep 10
-          done
-
-          echo "Health check failed after 30 attempts"
-          exit 1
-
-      - name: Test Deploy Summary
-        run: |
-          echo "## Test Environment Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Test Site URL:** http://${{ steps.outputs.outputs.public_ip }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
-
-  # Test Review Gate (human approval required)
-  test-review:
-    name: Test Review
-    needs: [build-image, deploy-test]
-    if: github.event.action == 'drupal-pr'
-    runs-on: ubuntu-latest
-    environment: test-review
-
-    steps:
-      - name: Test Review Approved
-        run: |
-          echo "## Test Review Approved" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Test environment validated. Proceeding to production approval." >> $GITHUB_STEP_SUMMARY
+          echo "Dev environment validated. Proceeding to production approval." >> $GITHUB_STEP_SUMMARY
 
   # Production Ready (requires approval)
   production-ready:
     name: Production Ready
-    needs: [build-image, deploy-test, test-review]
+    needs: [build-image, dev-review]
     if: github.event.action == 'drupal-pr'
     runs-on: ubuntu-latest
     environment: production-approval
@@ -496,7 +341,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Image Version:** ${{ needs.build-image.outputs.image_version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This image has been validated in both dev and test environments." >> $GITHUB_STEP_SUMMARY
+          echo "This image has been validated in the dev environment." >> $GITHUB_STEP_SUMMARY
           echo "Deploying to production..." >> $GITHUB_STEP_SUMMARY
 
   # Deploy tested image to production

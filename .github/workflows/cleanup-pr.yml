@@ -64,19 +64,6 @@ jobs:
           echo "::add-mask::$KEY"
           echo "TF_VAR_devtest_storage_key=$KEY" >> $GITHUB_ENV
 
-      # Destroy Test environment (if exists)
-      - name: Destroy Test Environment
-        working-directory: environments/test
-        continue-on-error: true
-        run: |
-          terraform init \
-            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=test/pr-${{ steps.pr_number.outputs.pr_number }}/terraform.tfstate"
-          terraform destroy -auto-approve -refresh=false \
-            -var="pr_number=${{ steps.pr_number.outputs.pr_number }}" || true
-
       # Destroy Dev environment (VM + Resource Group)
       - name: Destroy Dev Environment
         working-directory: environments/dev
@@ -96,4 +83,3 @@ jobs:
           echo "**PR Number:** ${{ steps.pr_number.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
           echo "**Resources Destroyed:**" >> $GITHUB_STEP_SUMMARY
           echo "- Dev Resource Group and VM" >> $GITHUB_STEP_SUMMARY
-          echo "- Test Resource Group and VM" >> $GITHUB_STEP_SUMMARY

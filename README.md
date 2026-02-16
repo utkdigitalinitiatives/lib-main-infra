@@ -27,8 +27,7 @@ lib-main-infra/
 ├── environments/
 │   ├── production/                  # Production environment
 │   ├── devtest/                     # Permanent shared PostgreSQL + Automation
-│   ├── dev/                         # Ephemeral PR dev stage
-│   └── test/                        # Ephemeral PR test stage
+│   └── dev/                         # Ephemeral PR dev stage
 └── bootstrap/                       # Azure setup scripts
 ```
 
@@ -39,7 +38,7 @@ This infrastructure repo works with the [lib-main](https://github.com/utkdigital
 1. Developers push code to lib-main
 2. lib-main's workflow sends `repository_dispatch` to this repo
 3. This repo builds a Packer image with the lib-main code
-4. The image is deployed through dev → test → production
+4. The image is deployed through dev → production
 
 ## Quick Start
 
@@ -113,7 +112,6 @@ terraform plan -var="subscription_id=..." -var="admin_ssh_public_key=..." ...
 | `lib-main-production-rg` | Production infrastructure |
 | `lib-main-devtest-rg` | Permanent shared PostgreSQL + Automation |
 | `lib-main-dev-pr-{N}-rg` | Ephemeral PR dev resources |
-| `lib-main-test-pr-{N}-rg` | Ephemeral PR test resources |
 
 ## License
 

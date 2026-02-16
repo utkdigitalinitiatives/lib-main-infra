@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 # Test Cloud-Init Workflow
 # ------------------------------------------------------------------------------
-# Lightweight manual workflow for testing cloud-init changes on dev/test VMs
+# Lightweight manual workflow for testing cloud-init changes on dev VMs
 # without triggering a full image build. Uses an existing image from the
 # gallery and deploys an ephemeral VM.
 #
@@ -13,7 +13,7 @@
 #   1. Go to Actions > "Test Cloud-Init" > Run workflow
 #   2. Provide an existing image version (e.g., 0.0.3)
 #   3. Optionally set a PR number for resource naming (default: 9999)
-#   4. Choose environment (dev or test)
+#   4. Choose environment (dev)
 #   5. When done testing, re-run with destroy_only=true to clean up
 # ------------------------------------------------------------------------------
 
@@ -38,7 +38,6 @@ on:
         type: choice
         options:
           - dev
-          - test
       sync_database:
         description: 'Sync production DB to devtest before deploy'
         required: false
