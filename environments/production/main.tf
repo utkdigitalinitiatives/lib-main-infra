@@ -107,7 +107,8 @@ module "load_balancer" {
   environment          = local.environment
   resource_group_name  = azurerm_resource_group.production.name
   location             = var.location
-  dns_label            = var.lb_dns_label
+  dns_label            = var.public_ip_id == null ? var.lb_dns_label : null
+  public_ip_id         = var.public_ip_id
   health_probe_path    = var.health_probe_path
   enable_https         = var.enable_https
   enable_outbound_rule = true
@@ -157,6 +158,13 @@ module "blob_storage" {
   tags = local.common_tags
 }
 
+# TLS certificate storage container (certs persist across VMSS instance replacements)
+resource "azurerm_storage_container" "tls_certs" {
+  name                  = "tls-certs"
+  storage_account_id    = module.blob_storage.storage_account_id
+  container_access_type = "private"
+}
+
 # VMSS: Single instance with rolling updates
 module "vmss" {
   source = "../../modules/drupal-vmss"
@@ -200,6 +208,8 @@ module "vmss" {
     lb_fqdn               = module.load_balancer.public_ip_fqdn
     drupal_admin_password = var.drupal_admin_password != null ? var.drupal_admin_password : random_password.drupal_admin.result
     drupal_site_uuid      = var.drupal_site_uuid
+    domain_name           = var.domain_name
+    enable_https          = var.enable_https
   })
 
   tags = merge(local.common_tags, {

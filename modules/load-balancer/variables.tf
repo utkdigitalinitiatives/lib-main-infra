@@ -61,6 +61,12 @@ variable "enable_outbound_rule" {
   default     = true
 }
 
+variable "public_ip_id" {
+  description = "Existing Azure public IP resource ID. If null, a new public IP is created."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

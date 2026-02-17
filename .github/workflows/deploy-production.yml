@@ -24,6 +24,9 @@ env:
   TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
   TF_VAR_enable_vmss_blob_access: "true"
   TF_VAR_drupal_site_uuid: ${{ vars.DRUPAL_SITE_UUID }}
+  TF_VAR_enable_https: "true"
+  TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
+  TF_VAR_public_ip_id: ${{ vars.PUBLIC_IP_ID }}
 
 jobs:
   deploy:
@@ -98,10 +101,15 @@ jobs:
       - name: Health Check
         run: |
           echo "Running health check..."
-          APP_URL="${{ steps.vmss.outputs.application_url }}"
+          # Use domain name with HTTP (health endpoint is exempt from HTTPS redirect)
+          if [ -n "${{ vars.DOMAIN_NAME }}" ]; then
+            HEALTH_URL="http://${{ vars.DOMAIN_NAME }}/health"
+          else
+            HEALTH_URL="${{ steps.vmss.outputs.application_url }}/health"
+          fi
 
           for i in {1..10}; do
-            if curl -sf "${APP_URL}/health" > /dev/null; then
+            if curl -sf "$HEALTH_URL" > /dev/null; then
               echo "Health check passed!"
               exit 0
             fi

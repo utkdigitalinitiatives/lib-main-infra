@@ -20,27 +20,22 @@ output "backend_pool_name" {
 
 output "public_ip_id" {
   description = "ID of the public IP"
-  value       = azurerm_public_ip.lb.id
+  value       = var.public_ip_id != null ? var.public_ip_id : azurerm_public_ip.lb[0].id
 }
 
 output "public_ip_address" {
-  description = "Public IP address of the Load Balancer"
-  value       = azurerm_public_ip.lb.ip_address
+  description = "Public IP address of the Load Balancer (null when using external IP)"
+  value       = var.public_ip_id == null ? azurerm_public_ip.lb[0].ip_address : null
 }
 
 output "public_ip_fqdn" {
-  description = "Fully qualified domain name of the public IP (if dns_label is set)"
-  value       = azurerm_public_ip.lb.fqdn
+  description = "Fully qualified domain name of the public IP (null when using external IP or no dns_label)"
+  value       = var.public_ip_id == null ? azurerm_public_ip.lb[0].fqdn : null
 }
 
 output "http_probe_id" {
   description = "ID of the HTTP health probe"
   value       = azurerm_lb_probe.http.id
-}
-
-output "https_probe_id" {
-  description = "ID of the HTTPS health probe (if enabled)"
-  value       = var.enable_https ? azurerm_lb_probe.https[0].id : null
 }
 
 output "frontend_ip_configuration_id" {

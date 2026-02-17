@@ -171,3 +171,15 @@ variable "drupal_site_uuid" {
   type        = string
   # No default - must be provided for each site to ensure unique UUIDs
 }
+
+variable "domain_name" {
+  description = "Domain name for TLS certificate (e.g., libdev1.lib.utk.edu)"
+  type        = string
+  default     = null
+}
+
+variable "public_ip_id" {
+  description = "Existing Azure public IP resource ID for the Load Balancer. If null, a new IP is created."
+  type        = string
+  default     = null
+}
