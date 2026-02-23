@@ -2,10 +2,10 @@ name: Production Start/Stop Schedule
 
 on:
   schedule:
-    # 8:30 AM EST (9:30 AM EDT) — start resources
-    - cron: '30 13 * * *'
-    # 5:30 PM EST (6:30 PM EDT) — stop resources
-    - cron: '30 22 * * *'
+    # 8:30 AM EST (9:30 AM EDT) — start resources (Mon–Fri)
+    - cron: '30 13 * * 1-5'
+    # 5:30 PM EST (6:30 PM EDT) — stop resources (Fri only; stays off Sat/Sun)
+    - cron: '30 22 * * 5'
   workflow_dispatch:
     inputs:
       action:
@@ -18,10 +18,10 @@ on:
 
 jobs:
   schedule:
-    name: ${{ (github.event_name == 'workflow_dispatch' && inputs.action) || (github.event.schedule == '30 13 * * *' && 'start') || 'stop' }} production
+    name: ${{ (github.event_name == 'workflow_dispatch' && inputs.action) || (github.event.schedule == '30 13 * * 1-5' && 'start') || 'stop' }} production
     runs-on: ubuntu-latest
     env:
-      ACTION: ${{ (github.event_name == 'workflow_dispatch' && inputs.action) || (github.event.schedule == '30 13 * * *' && 'start') || 'stop' }}
+      ACTION: ${{ (github.event_name == 'workflow_dispatch' && inputs.action) || (github.event.schedule == '30 13 * * 1-5' && 'start') || 'stop' }}
     steps:
       - name: Azure Login
         uses: azure/login@v2
