@@ -156,13 +156,23 @@ runcmd:
       sleep 10
     done
 
-  # Apply pending database updates and rebuild caches
+  # Apply pending database updates, import config, and rebuild caches
   - |
     DRUPAL_ROOT="/var/www/drupal"
     DRUSH="$DRUPAL_ROOT/vendor/bin/drush"
+    CONFIG_SYNC_DIR="$DRUPAL_ROOT/config/sync"
     cd "$DRUPAL_ROOT"
     echo "Running database updates..." >> /var/log/cloud-init-output.log
     sudo -u drupal $DRUSH updatedb -y >> /var/log/cloud-init-output.log 2>&1
+    # Import config if config/sync has files
+    if [ -f "$CONFIG_SYNC_DIR/system.site.yml" ]; then
+      echo "Importing configuration..." >> /var/log/cloud-init-output.log
+      sudo -u drupal $DRUSH config:import -y >> /var/log/cloud-init-output.log 2>&1 || {
+        echo "Config import failed (may be no changes), continuing..." >> /var/log/cloud-init-output.log
+      }
+    else
+      echo "No config in sync directory, skipping import" >> /var/log/cloud-init-output.log
+    fi
     echo "Rebuilding caches..." >> /var/log/cloud-init-output.log
     sudo -u drupal $DRUSH cache:rebuild >> /var/log/cloud-init-output.log 2>&1
     echo "Drupal update complete" >> /var/log/cloud-init-output.log
