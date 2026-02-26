@@ -167,7 +167,7 @@ variable "drupal_admin_password" {
 }
 
 variable "drupal_site_uuid" {
-  description = "Fixed Drupal site UUID for config sync. Must match config/sync/system.site.yml"
+  description = "Fixed Drupal site UUID for config sync. Must match config/system.site.yml"
   type        = string
   # No default - must be provided for each site to ensure unique UUIDs
 }

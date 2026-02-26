@@ -80,7 +80,7 @@
 
     - name: Create Drupal config sync directory
       ansible.builtin.file:
-        path: "{{ web_root }}/config/sync"
+        path: "{{ web_root }}/config"
         state: directory
         owner: "{{ drupal_user }}"
         group: "{{ drupal_group }}"
@@ -116,7 +116,7 @@
           /**
            * Config sync directory.
            */
-          $settings['config_sync_directory'] = '../config/sync';
+          $settings['config_sync_directory'] = '../config';
 
           /**
            * Private file path.

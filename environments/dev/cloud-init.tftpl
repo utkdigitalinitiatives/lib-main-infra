@@ -160,11 +160,11 @@ runcmd:
   - |
     DRUPAL_ROOT="/var/www/drupal"
     DRUSH="$DRUPAL_ROOT/vendor/bin/drush"
-    CONFIG_SYNC_DIR="$DRUPAL_ROOT/config/sync"
+    CONFIG_SYNC_DIR="$DRUPAL_ROOT/config"
     cd "$DRUPAL_ROOT"
     echo "Running database updates..." >> /var/log/cloud-init-output.log
     sudo -u drupal $DRUSH updatedb -y >> /var/log/cloud-init-output.log 2>&1
-    # Import config if config/sync has files
+    # Import config if config directory has files
     if [ -f "$CONFIG_SYNC_DIR/system.site.yml" ]; then
       echo "Importing configuration..." >> /var/log/cloud-init-output.log
       sudo -u drupal $DRUSH config:import -y >> /var/log/cloud-init-output.log 2>&1 || {

@@ -109,7 +109,7 @@ write_files:
 
       # Fixed site UUID for config sync (set via Terraform)
       SITE_UUID="${drupal_site_uuid}"
-      CONFIG_SYNC_DIR="$DRUPAL_ROOT/config/sync"
+      CONFIG_SYNC_DIR="$DRUPAL_ROOT/config"
 
       # Check if Drupal is already installed
       cd "$DRUPAL_ROOT"
@@ -117,7 +117,7 @@ write_files:
         log "Drupal already installed, running updates..."
         sudo -u drupal $DRUSH updatedb -y 2>&1 | tee -a "$LOG_FILE" || true
 
-        # Import config if config/sync has files (not just empty directory)
+        # Import config if config directory has files
         if [ -f "$CONFIG_SYNC_DIR/system.site.yml" ]; then
           log "Config sync directory has config, importing..."
           sudo -u drupal $DRUSH config:import -y 2>&1 | tee -a "$LOG_FILE" || {
