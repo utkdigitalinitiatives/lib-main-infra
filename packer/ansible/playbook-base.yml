@@ -333,6 +333,60 @@
         state: true
         persistent: true
 
+    # ==========================================================================
+    # Image manifest (captures installed versions for CI/CD readout)
+    # ==========================================================================
+    - name: Get OS release
+      ansible.builtin.command: cat /etc/redhat-release
+      register: _manifest_os
+      changed_when: false
+
+    - name: Get kernel version
+      ansible.builtin.command: uname -r
+      register: _manifest_kernel
+      changed_when: false
+
+    - name: Get PHP version
+      ansible.builtin.command: php -r 'echo PHP_VERSION;'
+      register: _manifest_php
+      changed_when: false
+
+    - name: Get Apache version
+      ansible.builtin.command: rpm -q httpd
+      register: _manifest_httpd
+      changed_when: false
+
+    - name: Get Composer version
+      ansible.builtin.shell: composer --version 2>/dev/null | head -1
+      register: _manifest_composer
+      changed_when: false
+
+    - name: Get PostgreSQL client version
+      ansible.builtin.shell: psql --version | head -1
+      register: _manifest_psql
+      changed_when: false
+
+    - name: Get Java version
+      ansible.builtin.shell: java -version 2>&1 | head -1
+      register: _manifest_java
+      changed_when: false
+
+    - name: Write image manifest
+      ansible.builtin.copy:
+        content: |
+          {
+            "os": {{ _manifest_os.stdout | to_json }},
+            "kernel": {{ _manifest_kernel.stdout | to_json }},
+            "php": {{ _manifest_php.stdout | to_json }},
+            "httpd": {{ _manifest_httpd.stdout | to_json }},
+            "composer": {{ _manifest_composer.stdout | to_json }},
+            "postgresql_client": {{ _manifest_psql.stdout | to_json }},
+            "java": {{ _manifest_java.stdout | to_json }},
+            "s3proxy": {{ s3proxy_version | to_json }}
+          }
+        dest: /etc/image-manifest.json
+        mode: "0644"
+
   handlers:
     - name: restart php-fpm
       ansible.builtin.systemd:

@@ -89,6 +89,13 @@ build {
     ]
   }
 
+  # Provisioner: Download image manifest for CI/CD reporting
+  provisioner "file" {
+    source      = "/etc/image-manifest.json"
+    destination = "${path.root}/image-manifest.json"
+    direction   = "download"
+  }
+
   # Provisioner: Cleanup and generalize for Azure
   provisioner "shell" {
     execute_command = "chmod +x {{ .Path }}; {{ .Vars }} sudo -E sh '{{ .Path }}'"

@@ -97,4 +97,20 @@ jobs:
           echo "**Image:** drupal-base-rocky-linux-9" >> $GITHUB_STEP_SUMMARY
           echo "**Gallery:** ${{ vars.GALLERY_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          MANIFEST="packer/image-manifest.json"
+          if [ -f "$MANIFEST" ]; then
+            echo "### Installed Versions" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Component | Version |" >> $GITHUB_STEP_SUMMARY
+            echo "|-----------|---------|" >> $GITHUB_STEP_SUMMARY
+            echo "| OS | $(jq -r '.os' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Kernel | $(jq -r '.kernel' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "| PHP | $(jq -r '.php' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Apache | $(jq -r '.httpd' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Composer | $(jq -r '.composer' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "| PostgreSQL Client | $(jq -r '.postgresql_client' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Java | $(jq -r '.java' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "| S3Proxy | $(jq -r '.s3proxy' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "This base image can now be used by the app image build workflow." >> $GITHUB_STEP_SUMMARY
