@@ -19,10 +19,16 @@ lib-main-infra/
 │   ├── build-on-dispatch.yml       # Dev merge: build image → dev VM
 │   ├── deploy-on-main-merge.yml    # Main merge: production deploy → dev cleanup
 │   ├── deploy-production.yml       # Manual production rolling update
+│   └── test-cloud-init.yml         # Manual cloud-init testing on dev VMs
 ├── packer/
+│   ├── plugins.pkr.hcl             # Shared plugin requirements
+│   ├── variables.pkr.hcl           # Shared variables
 │   ├── drupal-base-rocky9.pkr.hcl  # Base image (system packages)
 │   ├── drupal-rocky9.pkr.hcl       # App image (Drupal code)
-│   └── ansible/                     # Ansible playbooks
+│   └── ansible/
+│       ├── playbook-base.yml       # Base provisioning
+│       ├── playbook.yml            # App provisioning
+│       └── templates/              # Jinja2 templates (Apache, PHP-FPM, S3Proxy)
 ├── modules/                         # Reusable Terraform modules
 ├── environments/
 │   ├── production/                  # Production environment
