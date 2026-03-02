@@ -296,6 +296,28 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Waiting for manual approval. After approval, create a PR from dev to main to deploy to production." >> $GITHUB_STEP_SUMMARY
 
+      - name: Email Notification - Dev VM Ready
+        if: always() && steps.outputs.outputs.public_ip != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.postmarkapp.com
+          server_port: 587
+          username: ${{ secrets.POSTMARK_API_TOKEN }}
+          password: ${{ secrets.POSTMARK_API_TOKEN }}
+          subject: "Dev VM Ready - ${{ steps.outputs.outputs.public_ip }}"
+          to: wveale@utk.edu,aalbro@utk.edu
+          from: wveale@utk.edu
+          body: |
+            Dev VM deployed successfully.
+
+            Site URL: https://${{ steps.outputs.outputs.public_ip }}
+            Image Version: ${{ needs.build-image.outputs.image_version }}
+            Drupal SHA: ${{ github.event.client_payload.drupal_sha }}
+
+            Approve deployment:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        continue-on-error: true
+
   # Dev Review Gate (human approval required)
   dev-review:
     name: Dev Review
