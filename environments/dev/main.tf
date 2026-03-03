@@ -14,7 +14,7 @@
 #   3. Packer builds image with dev branch code
 #   4. Production DB synced to devtest PostgreSQL
 #   5. Dev VM deployed with new image for validation
-#   6. After dev-review approval, developer merges dev → main
+#   6. Developer merges dev → main
 #   7. Push to main triggers production deploy and dev VM cleanup
 #
 # State: dev/terraform.tfstate (single shared state)

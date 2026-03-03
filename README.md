@@ -106,7 +106,7 @@ terraform plan -var="subscription_id=..." -var="admin_ssh_public_key=..." ...
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `base-image-build.yml` | Monthly / Manual / Base file changes | Build base image with system packages |
-| `build-on-dispatch.yml` | `drupal-dev-merge` dispatch from lib-main | Build image → sync DB → deploy dev VM → dev-review |
+| `build-on-dispatch.yml` | `drupal-dev-merge` dispatch from lib-main | Build image → sync DB → deploy dev VM |
 | `deploy-on-main-merge.yml` | `drupal-main-merge` dispatch / Manual | Production deploy → dev VM cleanup |
 | `deploy-production.yml` | Manual | Rolling update to production (rollback/emergency) |
 | `test-cloud-init.yml` | Manual | Test cloud-init changes on dev VMs |
@@ -116,22 +116,21 @@ terraform plan -var="subscription_id=..." -var="admin_ssh_public_key=..." ...
 When code is merged to the `dev` branch in [lib-main](https://github.com/utkdigitalinitiatives/lib-main):
 
 ```
-build-image → prepare-database → deploy-dev → dev-review
+build-image → prepare-database → deploy-dev
 ```
 
 1. **Build Image** — Packer builds a new image (version `0.0.{RUN_NUMBER}`)
 2. **Prepare Database** — Production database is synced to the devtest PostgreSQL instance
 3. **Deploy Dev** — Shared dev VM deployed with the new image for validation
-4. **Dev Review** — Manual approval gate
 
 When `dev` is merged to `main`:
 
 ```
-get-image-version → deploy-production (approval gate) → cleanup-dev
+get-image-version → deploy-production → cleanup-dev
 ```
 
 1. **Get Image Version** — Queries gallery for latest image
-2. **Deploy to Production** — Rolling update to the production VMSS (requires approval)
+2. **Deploy to Production** — Rolling update to the production VMSS
 3. **Cleanup Dev** — Destroys the shared dev VM and resources
 
 ## Azure Resources
