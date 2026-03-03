@@ -317,17 +317,3 @@ jobs:
             Approve deployment:
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         continue-on-error: true
-
-  # Dev Review Gate (human approval required)
-  dev-review:
-    name: Dev Review
-    needs: [build-image, deploy-dev]
-    runs-on: ubuntu-latest
-    environment: dev-review
-
-    steps:
-      - name: Dev Review Approved
-        run: |
-          echo "## Dev Review Approved" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Dev environment validated. Create a PR from dev to main to deploy to production." >> $GITHUB_STEP_SUMMARY
