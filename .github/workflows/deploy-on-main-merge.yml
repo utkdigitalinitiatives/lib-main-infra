@@ -79,7 +79,6 @@ jobs:
     needs: get-image-version
     if: ${{ github.event_name == 'repository_dispatch' || !inputs.cleanup_only }}
     runs-on: ubuntu-latest
-    environment: production-approval
     env:
       TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_location: ${{ vars.LOCATION }}
