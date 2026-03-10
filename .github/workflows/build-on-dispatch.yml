@@ -228,10 +228,65 @@ jobs:
           echo "Database sync complete"
           rm -f /tmp/production.dump
 
+  # Sync production blob storage to devtest
+  sync-blob-storage:
+    name: Sync Blob Storage
+    needs: build-image
+    runs-on: ubuntu-latest
+    concurrency:
+      group: devtest-blob-storage
+      cancel-in-progress: false
+
+    steps:
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Generate SAS tokens
+        id: sas
+        run: |
+          EXPIRY=$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%MZ')
+
+          PROD_SAS=$(az storage account generate-sas \
+            --account-name drupalproductionqvx3otog \
+            --permissions rl \
+            --resource-types co \
+            --services b \
+            --expiry "$EXPIRY" \
+            -o tsv)
+          echo "::add-mask::$PROD_SAS"
+          echo "prod_sas=$PROD_SAS" >> $GITHUB_OUTPUT
+
+          DEVTEST_SAS=$(az storage account generate-sas \
+            --account-name drupaldevtest05q0a0t6 \
+            --permissions rwdlac \
+            --resource-types co \
+            --services b \
+            --expiry "$EXPIRY" \
+            -o tsv)
+          echo "::add-mask::$DEVTEST_SAS"
+          echo "devtest_sas=$DEVTEST_SAS" >> $GITHUB_OUTPUT
+
+      - name: Sync blobs from production to devtest
+        run: |
+          azcopy sync \
+            "https://drupalproductionqvx3otog.blob.core.windows.net/drupal-media?${{ steps.sas.outputs.prod_sas }}" \
+            "https://drupaldevtest05q0a0t6.blob.core.windows.net/drupal-media?${{ steps.sas.outputs.devtest_sas }}" \
+            --recursive \
+            --delete-destination=true
+
+      - name: Sync Summary
+        run: |
+          echo "## Blob Storage Sync Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Source:** drupalproductionqvx3otog/drupal-media" >> $GITHUB_STEP_SUMMARY
+          echo "**Destination:** drupaldevtest05q0a0t6/drupal-media" >> $GITHUB_STEP_SUMMARY
+
   # Deploy Dev Environment
   deploy-dev:
     name: Deploy Dev
-    needs: [build-image, prepare-database]
+    needs: [build-image, prepare-database, sync-blob-storage]
     runs-on: ubuntu-latest
     environment: dev
     outputs:
