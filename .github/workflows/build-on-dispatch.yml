@@ -328,7 +328,8 @@ jobs:
         working-directory: environments/dev
         run: |
           terraform apply -auto-approve \
-            -var="image_version=${{ needs.build-image.outputs.image_version }}"
+            -var="image_version=${{ needs.build-image.outputs.image_version }}" \
+            -replace="module.dev_vm.azurerm_linux_virtual_machine.dev"
 
       - name: Get Outputs
         id: outputs

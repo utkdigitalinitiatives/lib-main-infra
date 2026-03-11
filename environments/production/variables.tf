@@ -60,9 +60,15 @@ variable "private_endpoints_prefix" {
 }
 
 variable "allowed_ssh_cidr_blocks" {
-  description = "CIDR blocks allowed for SSH access (e.g., ['0.0.0.0/0'] to allow all)"
+  description = "CIDR blocks allowed for SSH access"
   type        = list(string)
-  default     = []
+  default = [
+    "160.36.0.0/16",   # UTK campus wired
+    "10.65.0.0/16",    # UTK VPN
+    "10.46.0.0/15",    # UTK mod1 (10.46.x.x and 10.47.x.x)
+    "216.96.128.0/17", # UTK eduroam
+    "192.249.1.0/24",  # UTK campus (new range, verify exact CIDR)
+  ]
 }
 
 # Load Balancer
