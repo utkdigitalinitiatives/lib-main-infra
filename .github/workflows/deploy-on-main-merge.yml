@@ -180,6 +180,7 @@ jobs:
           exit 1
 
       - name: Deployment Summary
+        if: always() && steps.vmss.outputs.application_url != ''
         run: |
           echo "## Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -189,6 +190,28 @@ jobs:
           echo "**Drupal SHA:** ${{ github.event.client_payload.drupal_sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Rolling update completed. Verify the application at the URL above." >> $GITHUB_STEP_SUMMARY
+
+      - name: Email Notification - Production Deploy
+        if: always() && steps.vmss.outputs.application_url != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.postmarkapp.com
+          server_port: 587
+          username: ${{ secrets.POSTMARK_API_TOKEN }}
+          password: ${{ secrets.POSTMARK_API_TOKEN }}
+          subject: "Production Deploy ${{ job.status == 'success' && 'Complete' || 'Failed' }} - ${{ needs.get-image-version.outputs.image_version }}"
+          to: wveale@utk.edu,aalbro@utk.edu
+          from: "lib-main-infra <wveale@utk.edu>"
+          body: |
+            Production deployment ${{ job.status }}.
+
+            Application URL: ${{ steps.vmss.outputs.application_url }}
+            Image Version: ${{ needs.get-image-version.outputs.image_version }}
+            Drupal SHA: ${{ github.event.client_payload.drupal_sha }}
+
+            View workflow run:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        continue-on-error: true
 
   # Cleanup dev VM after successful production deploy
   cleanup-dev:
