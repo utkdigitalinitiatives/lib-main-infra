@@ -378,6 +378,7 @@ jobs:
           fi
 
       - name: Dev Deploy Summary
+        if: always() && steps.outputs.outputs.public_ip != ''
         run: |
           echo "## Dev Environment Deployed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
