@@ -364,15 +364,15 @@ jobs:
             --command-id RunShellScript \
             --name drupal-dev-vm \
             --resource-group lib-main-dev-rg \
-            --scripts "grep -iE '(error|fatal|fail|warning)' /var/log/cloud-init-output.log || echo 'No errors found in cloud-init-output.log'" \
+            --scripts "grep -iE '(error|fatal|fail|warning)' /var/log/cloud-init-output.log; echo \"GREP_EXIT=\$?\"" \
             --query "value[0].message" -o tsv 2>&1)
 
           echo "$OUTPUT"
           echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-          # Fail the job if errors or fatal messages are found
-          if echo "$OUTPUT" | grep -qiE "(error|fatal)"; then
+          # Fail the job if grep actually found matches (exit code 0)
+          if echo "$OUTPUT" | grep -q "GREP_EXIT=0"; then
             echo "::error::Errors detected in cloud-init logs (see step summary for details)"
             exit 1
           fi
