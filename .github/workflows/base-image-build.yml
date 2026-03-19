@@ -114,3 +114,24 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
           echo "This base image can now be used by the app image build workflow." >> $GITHUB_STEP_SUMMARY
+
+      - name: Email Notification - Base Image Build Failed
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.postmarkapp.com
+          server_port: 587
+          username: ${{ secrets.POSTMARK_API_TOKEN }}
+          password: ${{ secrets.POSTMARK_API_TOKEN }}
+          subject: "Base Image Build Failed - ${{ steps.version.outputs.version }}"
+          to: wveale@utk.edu
+          from: "lib-main-infra <wveale@utk.edu>"
+          body: |
+            Base image build failed for version ${{ steps.version.outputs.version }}.
+
+            Image: drupal-base-rocky-linux-9
+            Trigger: ${{ github.event_name }}
+
+            View workflow run:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        continue-on-error: true
