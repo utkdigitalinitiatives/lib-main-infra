@@ -47,6 +47,16 @@ write_files:
       $settings['s3fs.access_key'] = 'unused';
       $settings['s3fs.secret_key'] = 'unused';
 
+      // Enable S3FS takeover of public:// stream wrapper
+      // Files are stored in blob storage instead of local disk
+      $config['s3fs.settings']['use_s3_for_public'] = TRUE;
+      $config['s3fs.settings']['use_s3_for_private'] = TRUE;
+
+      // Generate file URLs through Apache reverse proxy (proxies to S3Proxy)
+      $config['s3fs.settings']['use_cname'] = TRUE;
+      $s3fs_host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'localhost';
+      $config['s3fs.settings']['domain'] = $s3fs_host . '/s3/files';
+
   # S3Proxy properties file
   - path: /etc/s3proxy/s3proxy.properties
     permissions: '0640'
@@ -109,6 +119,10 @@ runcmd:
             SetHandler none
             Require all granted
         </Location>
+
+        # Reverse proxy for S3FS files from S3Proxy
+        ProxyPass /s3/files/ http://127.0.0.1:8080/drupal-media/
+        ProxyPassReverse /s3/files/ http://127.0.0.1:8080/drupal-media/
 
         Header always set X-Frame-Options "SAMEORIGIN"
         Header always set X-Content-Type-Options "nosniff"
