@@ -1,7 +1,7 @@
 ---
 # Drupal App Image Playbook
 # This playbook runs on top of the base image and adds Drupal-specific components.
-# System packages, PHP, Apache, S3Proxy are all pre-installed in the base image.
+# System packages, PHP, and Apache are all pre-installed in the base image.
 # Estimated runtime: ~2-3 minutes (vs ~8 minutes with full provisioning)
 #
 # lib-main integration: When drupal_repo is provided, clones from Git instead of

@@ -109,8 +109,7 @@ jobs:
             echo "| Apache | $(jq -r '.httpd' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
             echo "| Composer | $(jq -r '.composer' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
             echo "| PostgreSQL Client | $(jq -r '.postgresql_client' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
-            echo "| Java | $(jq -r '.java' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
-            echo "| S3Proxy | $(jq -r '.s3proxy' $MANIFEST) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Storage | az_blob_fs (native PHP SDK) |" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
           echo "This base image can now be used by the app image build workflow." >> $GITHUB_STEP_SUMMARY
