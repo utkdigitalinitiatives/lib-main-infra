@@ -9,7 +9,7 @@
 #   - Optional private endpoint for secure access
 #
 # Integration:
-#   Drupal accesses blobs via S3Proxy (S3-compatible API gateway).
+#   Drupal accesses blobs via az_blob_fs module (native Azure Blob PHP SDK).
 #   VMSS identity needs Storage Blob Data Contributor role.
 # ------------------------------------------------------------------------------
 

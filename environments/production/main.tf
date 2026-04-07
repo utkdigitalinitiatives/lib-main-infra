@@ -6,7 +6,7 @@
 #   - Networking: VNet, subnets, NSG with load balancer rules
 #   - Load Balancer: Public Standard LB with health probes
 #   - PostgreSQL: Flexible Server with 14-day backup retention
-#   - Blob Storage: Media files accessed via S3Proxy
+#   - Blob Storage: Media files accessed via az_blob_fs (Azure Blob File System)
 #   - VMSS: Single instance with rolling updates
 #
 # Deployment:
@@ -158,6 +158,40 @@ module "blob_storage" {
   tags = local.common_tags
 }
 
+# SAS token for Apache reverse proxy to serve blob storage files (read-only, 2-year expiry)
+data "azurerm_storage_account_sas" "media_read" {
+  connection_string = module.blob_storage.primary_connection_string
+  https_only        = true
+  start             = "2026-01-01T00:00:00Z"
+  expiry            = "2028-01-01T00:00:00Z"
+
+  resource_types {
+    service   = false
+    container = false
+    object    = true
+  }
+
+  services {
+    blob  = true
+    queue = false
+    table = false
+    file  = false
+  }
+
+  permissions {
+    read    = true
+    write   = false
+    delete  = false
+    list    = false
+    add     = false
+    create  = false
+    update  = false
+    process = false
+    tag     = false
+    filter  = false
+  }
+}
+
 # TLS certificate storage container (certs persist across VMSS instance replacements)
 resource "azurerm_storage_container" "tls_certs" {
   name                  = "tls-certs"
@@ -204,6 +238,7 @@ module "vmss" {
     storage_container     = module.blob_storage.container_name
     storage_endpoint      = module.blob_storage.primary_blob_endpoint
     storage_key           = module.blob_storage.primary_access_key
+    storage_sas_token     = data.azurerm_storage_account_sas.media_read.sas
     hash_salt             = random_password.drupal_hash_salt.result
     lb_fqdn               = module.load_balancer.public_ip_fqdn
     drupal_admin_password = var.drupal_admin_password != null ? var.drupal_admin_password : random_password.drupal_admin.result

@@ -40,27 +40,19 @@ write_files:
 %{ endif ~}
       ];
 
-      // S3FS configuration for Azure Blob Storage via S3Proxy
-      $config['s3fs.settings']['bucket'] = '${storage_container}';
-      $config['s3fs.settings']['region'] = 'us-east-1';
-      $config['s3fs.settings']['use_customhost'] = TRUE;
-      $config['s3fs.settings']['hostname'] = 'localhost:8080';
-      $config['s3fs.settings']['use_path_style_endpoint'] = TRUE;
-      $config['s3fs.settings']['use_https'] = FALSE;
+      // Key module: inject storage key into Key entity
+      $config['key.key.azure_blob_key']['key_provider'] = 'config';
+      $config['key.key.azure_blob_key']['key_provider_settings']['key_value'] = '${storage_key}';
 
-      // S3FS credentials (not used with S3Proxy authorization=none)
-      $settings['s3fs.access_key'] = 'unused';
-      $settings['s3fs.secret_key'] = 'unused';
+      // Azure Blob File System configuration
+      $config['az_blob_fs.settings']['az_blob_account_name'] = '${storage_account}';
+      $config['az_blob_fs.settings']['az_blob_account_key_name'] = 'azure_blob_key';
+      $config['az_blob_fs.settings']['az_blob_container_name'] = '${storage_container}';
+      $config['az_blob_fs.settings']['az_blob_protocol'] = 'https';
+      $config['az_blob_fs.settings']['az_blob_cdn_host_name'] = '${domain_name}';
 
-      // Enable S3FS takeover of public:// stream wrapper
-      // Files are stored in blob storage instead of local disk
-      $config['s3fs.settings']['use_s3_for_public'] = TRUE;
-      $config['s3fs.settings']['use_s3_for_private'] = TRUE;
-
-      // Generate file URLs through Apache reverse proxy (proxies to S3Proxy)
-      $config['s3fs.settings']['use_cname'] = TRUE;
-      $s3fs_host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'localhost';
-      $config['s3fs.settings']['domain'] = $s3fs_host . '/s3/files';
+      // Default file scheme
+      $settings['file_default_scheme'] = 'azblob';
 
       // Reverse proxy settings for Azure Load Balancer
       $settings['reverse_proxy'] = TRUE;
@@ -70,19 +62,6 @@ write_files:
         \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_HOST |
         \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_PORT |
         \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_PROTO;
-
-  # S3Proxy properties file
-  - path: /etc/s3proxy/s3proxy.properties
-    permissions: '0640'
-    owner: root:s3proxy
-    content: |
-      # S3Proxy configuration for Azure Blob Storage
-      jclouds.provider=azureblob
-      jclouds.identity=${storage_account}
-      jclouds.credential=${storage_key}
-      jclouds.endpoint=https://${storage_account}.blob.core.windows.net
-      s3proxy.authorization=none
-      s3proxy.endpoint=http://127.0.0.1:8080
 
   # Drupal installation script
   - path: /opt/drupal-init.sh
@@ -106,16 +85,6 @@ write_files:
       }
 
       log "Starting Drupal initialization..."
-
-      # Wait for S3Proxy to be ready
-      for i in {1..30}; do
-        if curl -s http://127.0.0.1:8080/ > /dev/null 2>&1; then
-          log "S3Proxy is ready"
-          break
-        fi
-        log "Waiting for S3Proxy... ($i/30)"
-        sleep 2
-      done
 
       # Fixed site UUID for config sync (set via Terraform)
       SITE_UUID="${drupal_site_uuid}"
@@ -153,8 +122,8 @@ write_files:
         log "Setting site UUID to $SITE_UUID..."
         sudo -u drupal $DRUSH config:set system.site uuid "$SITE_UUID" -y 2>&1 | tee -a "$LOG_FILE"
 
-        log "Enabling S3FS module..."
-        sudo -u drupal $DRUSH en s3fs -y 2>&1 | tee -a "$LOG_FILE" || true
+        log "Enabling Azure Blob FS module..."
+        sudo -u drupal $DRUSH en key az_blob_fs -y 2>&1 | tee -a "$LOG_FILE" || true
 
         log "Rebuilding cache..."
         sudo -u drupal $DRUSH cache:rebuild 2>&1 | tee -a "$LOG_FILE"
@@ -305,9 +274,11 @@ write_files:
               Require all granted
           </Location>
 
-          # Reverse proxy for S3FS files from S3Proxy
-          ProxyPass /s3/files/ http://127.0.0.1:8080/drupal-media/
-          ProxyPassReverse /s3/files/ http://127.0.0.1:8080/drupal-media/
+          # Reverse proxy for Azure Blob Storage files (private container, SAS auth)
+          SSLProxyEngine On
+          RewriteEngine On
+          RewriteCond %%{REQUEST_URI} ^/drupal-media/
+          RewriteRule ^/drupal-media/(.*)$ https://${storage_account}.blob.core.windows.net/drupal-media/\$1?${storage_sas_token} [P,L]
 
           Header always set X-Frame-Options "SAMEORIGIN"
           Header always set X-Content-Type-Options "nosniff"
@@ -402,15 +373,6 @@ runcmd:
   - chown root:drupal /etc/drupal
   - chmod 750 /etc/drupal
   - chown root:drupal /etc/drupal/environment.php
-
-  - chown root:s3proxy /etc/s3proxy
-  - chmod 750 /etc/s3proxy
-  - chown root:s3proxy /etc/s3proxy/s3proxy.properties
-
-  # Enable and start S3Proxy service (enabled here, not in image, to avoid boot race condition)
-  - systemctl enable s3proxy
-  - systemctl start s3proxy
-  - systemctl status s3proxy || true
 
   # Run Drupal initialization
   - /opt/drupal-init.sh

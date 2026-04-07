@@ -13,10 +13,6 @@
     drupal_user: "drupal"
     drupal_group: "drupal"
     web_root: "/var/www/drupal"
-    s3proxy_version: "2.6.0"
-    s3proxy_user: "s3proxy"
-    s3proxy_group: "s3proxy"
-    s3proxy_home: "/opt/s3proxy"
 
   tasks:
     # ==========================================================================
@@ -85,8 +81,6 @@
           - htop
           - curl
           - wget
-          # Java for S3Proxy
-          - java-11-openjdk-headless
           # SELinux tools
           - policycoreutils-python-utils
           - setools-console
@@ -220,72 +214,6 @@
         enabled: true
 
     # ==========================================================================
-    # S3Proxy installation
-    # ==========================================================================
-    - name: Create s3proxy group
-      ansible.builtin.group:
-        name: "{{ s3proxy_group }}"
-        system: true
-        state: present
-
-    - name: Create s3proxy user
-      ansible.builtin.user:
-        name: "{{ s3proxy_user }}"
-        group: "{{ s3proxy_group }}"
-        create_home: false
-        shell: /sbin/nologin
-        system: true
-        state: present
-
-    - name: Create S3Proxy directories
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        owner: "{{ s3proxy_user }}"
-        group: "{{ s3proxy_group }}"
-        mode: "0755"
-      loop:
-        - "{{ s3proxy_home }}"
-        - "{{ s3proxy_home }}/data"
-        - /etc/s3proxy
-
-    - name: Download S3Proxy JAR
-      ansible.builtin.get_url:
-        url: "https://github.com/gaul/s3proxy/releases/download/s3proxy-{{ s3proxy_version }}/s3proxy"
-        dest: "{{ s3proxy_home }}/s3proxy.jar"
-        owner: "{{ s3proxy_user }}"
-        group: "{{ s3proxy_group }}"
-        mode: "0644"
-
-    - name: Create S3Proxy systemd service
-      ansible.builtin.template:
-        src: templates/s3proxy.service.j2
-        dest: /etc/systemd/system/s3proxy.service
-        mode: "0644"
-      notify: reload systemd
-
-    - name: Create S3Proxy environment file placeholder
-      ansible.builtin.copy:
-        content: |
-          # S3Proxy environment configuration
-          # This file is populated by cloud-init at boot with storage account credentials
-          # JCLOUDS_PROVIDER=azureblob
-          # JCLOUDS_IDENTITY=<storage_account_name>
-          # JCLOUDS_CREDENTIAL=<storage_account_key>
-          # JCLOUDS_ENDPOINT=https://<storage_account_name>.blob.core.windows.net
-          # S3PROXY_AUTHORIZATION=none
-        dest: /etc/s3proxy/s3proxy.env
-        owner: root
-        group: "{{ s3proxy_group }}"
-        mode: "0640"
-
-    - name: Reload systemd for s3proxy (do not enable; cloud-init starts it after writing config)
-      ansible.builtin.systemd:
-        name: s3proxy
-        enabled: false
-        daemon_reload: true
-
-    # ==========================================================================
     # Firewall configuration
     # ==========================================================================
     - name: Enable firewalld
@@ -366,11 +294,6 @@
       register: _manifest_psql
       changed_when: false
 
-    - name: Get Java version
-      ansible.builtin.shell: java -version 2>&1 | head -1
-      register: _manifest_java
-      changed_when: false
-
     - name: Write image manifest
       ansible.builtin.copy:
         content: |
@@ -380,9 +303,7 @@
             "php": {{ _manifest_php.stdout | to_json }},
             "httpd": {{ _manifest_httpd.stdout | to_json }},
             "composer": {{ _manifest_composer.stdout | to_json }},
-            "postgresql_client": {{ _manifest_psql.stdout | to_json }},
-            "java": {{ _manifest_java.stdout | to_json }},
-            "s3proxy": {{ s3proxy_version | to_json }}
+            "postgresql_client": {{ _manifest_psql.stdout | to_json }}
           }
         dest: /etc/image-manifest.json
         mode: "0644"
