@@ -238,7 +238,10 @@ module "vmss" {
     storage_container     = module.blob_storage.container_name
     storage_endpoint      = module.blob_storage.primary_blob_endpoint
     storage_key           = module.blob_storage.primary_access_key
-    storage_sas_token     = data.azurerm_storage_account_sas.media_read.sas
+    # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
+    # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
+    # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.
+    storage_sas_token = replace(data.azurerm_storage_account_sas.media_read.sas, "%", "\\%")
     hash_salt             = random_password.drupal_hash_salt.result
     lb_fqdn               = module.load_balancer.public_ip_fqdn
     drupal_admin_password = var.drupal_admin_password != null ? var.drupal_admin_password : random_password.drupal_admin.result

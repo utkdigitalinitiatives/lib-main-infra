@@ -131,7 +131,10 @@ module "dev_vm" {
     hash_salt       = random_password.drupal_hash_salt.result
     storage_account   = var.devtest_storage_account
     storage_key       = var.devtest_storage_key
-    storage_sas_token = data.azurerm_storage_account_sas.media_read.sas
+    # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
+    # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
+    # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.
+    storage_sas_token = replace(data.azurerm_storage_account_sas.media_read.sas, "%", "\\%")
   })
 
   tags = {

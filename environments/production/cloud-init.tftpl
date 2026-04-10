@@ -96,6 +96,30 @@ write_files:
         log "Drupal already installed, running updates..."
         sudo -u drupal $DRUSH updatedb -y 2>&1 | tee -a "$LOG_FILE" || true
 
+        # Clean up orphaned s3fs module references (s3fs → az_blob_fs migration).
+        # If the DB was synced from an environment where s3fs was still enabled,
+        # drush config:import would fail trying to uninstall a module whose code
+        # has already been removed from the codebase. Force-remove the references
+        # directly in the active config store so config:import can proceed. This
+        # block is idempotent: once the upstream DB no longer has s3fs, it is a
+        # no-op and can eventually be deleted.
+        log "Cleaning up orphaned s3fs module references (if any)..."
+        sudo -u drupal $DRUSH php:eval '
+          $editable = \Drupal::configFactory()->getEditable("core.extension");
+          $modules = $editable->get("module") ?: [];
+          if (isset($modules["s3fs"])) {
+            unset($modules["s3fs"]);
+            $editable->set("module", $modules)->save();
+            echo "Removed s3fs from core.extension active config\n";
+          }
+          \Drupal::keyValue("system.schema")->delete("s3fs");
+          foreach (\Drupal::configFactory()->listAll("s3fs.") as $name) {
+            \Drupal::configFactory()->getEditable($name)->delete();
+            echo "Deleted $name\n";
+          }
+        ' 2>&1 | tee -a "$LOG_FILE" || true
+        sudo -u drupal $DRUSH cache:rebuild 2>&1 | tee -a "$LOG_FILE" || true
+
         # Import config if config directory has files
         if [ -f "$CONFIG_SYNC_DIR/system.site.yml" ]; then
           log "Config sync directory has config, importing..."
@@ -278,7 +302,7 @@ write_files:
           SSLProxyEngine On
           RewriteEngine On
           RewriteCond %%{REQUEST_URI} ^/drupal-media/
-          RewriteRule ^/drupal-media/(.*)$ https://${storage_account}.blob.core.windows.net/drupal-media/\$1?${storage_sas_token} [P,L]
+          RewriteRule ^/drupal-media/(.*)$ https://${storage_account}.blob.core.windows.net/drupal-media/\$1${storage_sas_token} [P,L,NE,E=proxy-nocanon:1]
 
           Header always set X-Frame-Options "SAMEORIGIN"
           Header always set X-Content-Type-Options "nosniff"
