@@ -118,6 +118,12 @@ variable "additional_principal_ids" {
   default = {}
 }
 
+variable "developer_identities" {
+  description = "Map of developer username -> Azure AD object ID. Each gets an isolated drupal-media-<username> container plus Storage Blob Data Contributor on the storage account for azcopy sync. Devtest only."
+  type        = map(string)
+  default     = {}
+}
+
 # Private endpoint (production)
 variable "private_endpoint_subnet_id" {
   description = "Subnet ID for private endpoint (null for public access)"

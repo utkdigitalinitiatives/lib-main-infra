@@ -23,6 +23,14 @@ output "container_url" {
   value       = "${azurerm_storage_account.drupal.primary_blob_endpoint}${azurerm_storage_container.media.name}"
 }
 
+output "dev_container_urls" {
+  description = "Map of developer username to per-dev container URL (devtest only)"
+  value = {
+    for name, c in azurerm_storage_container.dev_media :
+    name => "${azurerm_storage_account.drupal.primary_blob_endpoint}${c.name}"
+  }
+}
+
 output "primary_access_key" {
   description = "Primary access key for the storage account"
   value       = azurerm_storage_account.drupal.primary_access_key
