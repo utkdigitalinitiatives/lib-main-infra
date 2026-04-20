@@ -76,6 +76,15 @@ module "blob_storage" {
   soft_delete_retention_days = 7
   enable_versioning          = false
 
+  # Per-developer isolated media containers + RBAC for azcopy sync.
+  # AAD object IDs collected via: az ad user show --id <email> --query id -o tsv
+  developer_identities = {
+    aalbro   = "9d4c8253-5a4c-4688-bc17-4f234e1574bc"
+    dshaw11  = "c240b11c-3d92-427f-8dda-417ba2ea94b3"
+    mcheeti1 = "b8259997-975d-4b87-b799-87caab129a51"
+    wveale   = "24511b84-14e4-4dc5-bba4-19e4b7a4a1b0"
+  }
+
   tags = local.common_tags
 }
 

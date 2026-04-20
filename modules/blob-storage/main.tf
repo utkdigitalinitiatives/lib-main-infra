@@ -96,6 +96,22 @@ resource "azurerm_storage_container" "media" {
   container_access_type = "private"
 }
 
+# Per-developer isolated media containers (devtest only)
+resource "azurerm_storage_container" "dev_media" {
+  for_each              = var.developer_identities
+  name                  = "drupal-media-${each.key}"
+  storage_account_id    = azurerm_storage_account.drupal.id
+  container_access_type = "private"
+}
+
+# Grant developers Storage Blob Data Contributor for azcopy sync (AAD auth)
+resource "azurerm_role_assignment" "dev_blob_contributor" {
+  for_each             = var.developer_identities
+  scope                = azurerm_storage_account.drupal.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = each.value
+}
+
 # Role assignment: Allow VMSS managed identity to access blobs
 resource "azurerm_role_assignment" "vmss_blob_contributor" {
   count                = var.enable_vmss_blob_access ? 1 : 0
