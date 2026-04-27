@@ -87,10 +87,13 @@ write_files:
           | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])"
       }
 
+      # Retry for ~3 minutes: the dev VM is recreated each merge, so the KV
+      # role assignment is fresh on every boot and RBAC propagation can lag
+      # 1-2 minutes behind cloud-init's first fetch.
       DB_PASSWORD=""
       HASH_SALT=""
       STORAGE_KEY=""
-      for attempt in 1 2 3 4 5 6; do
+      for attempt in $(seq 1 18); do
         TOKEN=$(get_token || true)
         if [ -n "$TOKEN" ]; then
           DB_PASSWORD=$(fetch_secret "$ENV_NAME-db-admin-password" "$TOKEN" || true)
