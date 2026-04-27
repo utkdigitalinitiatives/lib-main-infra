@@ -86,8 +86,3 @@ variable "devtest_storage_account" {
   type        = string
 }
 
-variable "devtest_storage_key" {
-  description = "Access key for the permanent devtest storage account"
-  type        = string
-  sensitive   = true
-}

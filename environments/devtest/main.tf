@@ -63,6 +63,16 @@ data "azurerm_key_vault_secret" "db_admin_password" {
   key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
 }
 
+# Mirror the devtest storage account access key into KV. Consumed by the dev
+# VM env (environments/dev/) via a data source, so the dev workflow no longer
+# needs `az storage account keys list` at runtime.
+resource "azurerm_key_vault_secret" "storage_account_key" {
+  name         = "devtest-storage-account-key"
+  value        = module.blob_storage.primary_access_key
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+  content_type = "text/plain"
+}
+
 module "postgresql" {
   source = "../../modules/postgresql"
 

@@ -172,15 +172,6 @@ jobs:
           echo "Database sync complete"
           rm -f /tmp/production.dump
 
-      - name: Get devtest storage key
-        run: |
-          KEY=$(az storage account keys list \
-            --account-name "${{ vars.DEVTEST_STORAGE_ACCOUNT }}" \
-            --resource-group lib-main-devtest-rg \
-            --query "[0].value" -o tsv)
-          echo "::add-mask::$KEY"
-          echo "TF_VAR_devtest_storage_key=$KEY" >> $GITHUB_ENV
-
       - name: Terraform Init
         working-directory: environments/${{ inputs.environment }}
         run: |

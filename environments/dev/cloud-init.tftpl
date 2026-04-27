@@ -37,9 +37,10 @@ write_files:
         '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$',
       ];
 
-      // Key module: inject storage key into Key entity
+      // Key module: inject storage key into Key entity.
+      // Substituted at boot by /opt/fetch-secrets.sh (Key Vault).
       $config['key.key.azure_blob_key']['key_provider'] = 'config';
-      $config['key.key.azure_blob_key']['key_provider_settings']['key_value'] = '${storage_key}';
+      $config['key.key.azure_blob_key']['key_provider_settings']['key_value'] = '__STORAGE_KEY__';
 
       // Azure Blob File System configuration
       $config['az_blob_fs.settings']['az_blob_account_name'] = '${storage_account}';
@@ -64,6 +65,7 @@ write_files:
       KV_NAME="${kv_name}"
       ENV_NAME="${env_name}"
       HASH_SALT_SECRET="${hash_salt_secret_name}"
+      STORAGE_KEY_SECRET="${storage_key_secret_name}"
       ENV_PHP="/etc/drupal/environment.php"
       LOG_FILE="/var/log/cloud-init-output.log"
 
@@ -87,29 +89,33 @@ write_files:
 
       DB_PASSWORD=""
       HASH_SALT=""
+      STORAGE_KEY=""
       for attempt in 1 2 3 4 5 6; do
         TOKEN=$(get_token || true)
         if [ -n "$TOKEN" ]; then
           DB_PASSWORD=$(fetch_secret "$ENV_NAME-db-admin-password" "$TOKEN" || true)
           HASH_SALT=$(fetch_secret "$HASH_SALT_SECRET" "$TOKEN" || true)
-          [ -n "$DB_PASSWORD" ] && [ -n "$HASH_SALT" ] && break
+          STORAGE_KEY=$(fetch_secret "$STORAGE_KEY_SECRET" "$TOKEN" || true)
+          [ -n "$DB_PASSWORD" ] && [ -n "$HASH_SALT" ] && [ -n "$STORAGE_KEY" ] && break
         fi
         log "Secret fetch attempt $attempt failed; retrying in 10s..."
         sleep 10
       done
 
-      if [ -z "$DB_PASSWORD" ] || [ -z "$HASH_SALT" ]; then
+      if [ -z "$DB_PASSWORD" ] || [ -z "$HASH_SALT" ] || [ -z "$STORAGE_KEY" ]; then
         log "ERROR: could not fetch required secrets from $KV_NAME"
         exit 1
       fi
 
-      DB_PASSWORD="$DB_PASSWORD" HASH_SALT="$HASH_SALT" python3 - "$ENV_PHP" <<'PYEOF'
+      DB_PASSWORD="$DB_PASSWORD" HASH_SALT="$HASH_SALT" STORAGE_KEY="$STORAGE_KEY" \
+        python3 - "$ENV_PHP" <<'PYEOF'
       import os, sys
       path = sys.argv[1]
       with open(path) as f:
           content = f.read()
       content = content.replace('__DB_PASSWORD__', os.environ['DB_PASSWORD'])
       content = content.replace('__HASH_SALT__', os.environ['HASH_SALT'])
+      content = content.replace('__STORAGE_KEY__', os.environ['STORAGE_KEY'])
       with open(path, 'w') as f:
           f.write(content)
       PYEOF

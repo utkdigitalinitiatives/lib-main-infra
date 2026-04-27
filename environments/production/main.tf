@@ -115,6 +115,16 @@ resource "azurerm_key_vault_secret" "drupal_admin_password" {
   content_type = "text/plain"
 }
 
+# Mirror the storage account access key into KV so cloud-init can fetch it via
+# managed identity instead of receiving it through templatefile() substitution.
+# Long-term goal is to eliminate this entirely by switching az_blob_fs to MI auth.
+resource "azurerm_key_vault_secret" "storage_account_key" {
+  name         = "production-storage-account-key"
+  value        = module.blob_storage.primary_access_key
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+  content_type = "text/plain"
+}
+
 # Data source: Get image version from Azure Compute Gallery
 data "azurerm_shared_image_version" "drupal" {
   count               = var.use_gallery_image ? 1 : 0
@@ -280,7 +290,7 @@ module "vmss" {
     storage_account       = module.blob_storage.storage_account_name
     storage_container     = module.blob_storage.container_name
     storage_endpoint      = module.blob_storage.primary_blob_endpoint
-    storage_key           = module.blob_storage.primary_access_key
+    storage_key_secret_name = azurerm_key_vault_secret.storage_account_key.name
     # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
     # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
     # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.
