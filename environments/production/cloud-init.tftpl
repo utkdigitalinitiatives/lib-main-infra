@@ -15,10 +15,11 @@ write_files:
        */
 
       // Database configuration
+      // Password is substituted at boot by /opt/fetch-secrets.sh (Key Vault).
       $databases['default']['default'] = [
         'database' => '${db_name}',
         'username' => '${db_user}',
-        'password' => '${db_password}',
+        'password' => '__DB_PASSWORD__',
         'host' => '${db_host}',
         'port' => '5432',
         'driver' => 'pgsql',
@@ -63,6 +64,78 @@ write_files:
         \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_PORT |
         \Symfony\Component\HttpFoundation\Request::HEADER_X_FORWARDED_PROTO;
 
+  # Secrets bootstrap: fetches Key Vault secrets via VMSS managed identity,
+  # substitutes placeholders in environment.php, and writes /etc/drupal/secrets.env
+  # for downstream shell scripts (drush, etc.).
+  - path: /opt/fetch-secrets.sh
+    permissions: '0750'
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      KV_NAME="${kv_name}"
+      ENV_NAME="${env_name}"
+      ENV_PHP="/etc/drupal/environment.php"
+      SECRETS_ENV="/etc/drupal/secrets.env"
+      LOG_FILE="/var/log/drupal-init.log"
+
+      log() {
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [fetch-secrets] $1" | tee -a "$LOG_FILE"
+      }
+
+      get_token() {
+        curl -s -H "Metadata: true" \
+          "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://vault.azure.net" \
+          | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
+      }
+
+      fetch_secret() {
+        local name="$1"
+        local token="$2"
+        curl -s -H "Authorization: Bearer $token" \
+          "https://$KV_NAME.vault.azure.net/secrets/$name?api-version=7.4" \
+          | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])"
+      }
+
+      # Retry: RBAC role propagation can lag a few seconds after VMSS boot.
+      DB_PASSWORD=""
+      for attempt in 1 2 3 4 5 6; do
+        TOKEN=$(get_token || true)
+        if [ -n "$TOKEN" ]; then
+          DB_PASSWORD=$(fetch_secret "$ENV_NAME-db-admin-password" "$TOKEN" || true)
+          [ -n "$DB_PASSWORD" ] && break
+        fi
+        log "Secret fetch attempt $attempt failed; retrying in 10s..."
+        sleep 10
+      done
+
+      if [ -z "$DB_PASSWORD" ]; then
+        log "ERROR: could not fetch $ENV_NAME-db-admin-password from $KV_NAME"
+        exit 1
+      fi
+
+      # Substitute placeholder in environment.php. Use python rather than sed
+      # so '/' '&' '|' in the password don't need escaping.
+      DB_PASSWORD="$DB_PASSWORD" python3 - "$ENV_PHP" <<'PYEOF'
+      import os, sys
+      path = sys.argv[1]
+      with open(path) as f:
+          content = f.read()
+      content = content.replace('__DB_PASSWORD__', os.environ['DB_PASSWORD'])
+      with open(path, 'w') as f:
+          f.write(content)
+      PYEOF
+
+      umask 077
+      cat > "$SECRETS_ENV" <<EOF
+      DB_PASSWORD=$DB_PASSWORD
+      EOF
+      chmod 640 "$SECRETS_ENV"
+      chown root:drupal "$SECRETS_ENV"
+
+      log "Secrets bootstrap complete"
+
   # Drupal installation script
   - path: /opt/drupal-init.sh
     permissions: '0750'
@@ -70,6 +143,10 @@ write_files:
     content: |
       #!/bin/bash
       set -e
+
+      # Sourced from /opt/fetch-secrets.sh (Key Vault MI).
+      # shellcheck disable=SC1091
+      source /etc/drupal/secrets.env
 
       DRUPAL_ROOT="/var/www/drupal"
       DRUSH="$DRUPAL_ROOT/vendor/bin/drush"
@@ -135,7 +212,7 @@ write_files:
       else
         log "Installing Drupal..."
         sudo -u drupal $DRUSH site:install standard \
-          --db-url="pgsql://${db_user}:${db_password}@${db_host}:5432/${db_name}" \
+          --db-url="pgsql://${db_user}:$DB_PASSWORD@${db_host}:5432/${db_name}" \
           --site-name="lib-main" \
           --account-name=admin \
           --account-pass="${drupal_admin_password}" \
@@ -397,6 +474,9 @@ runcmd:
   - chown root:drupal /etc/drupal
   - chmod 750 /etc/drupal
   - chown root:drupal /etc/drupal/environment.php
+
+  # Fetch secrets from Key Vault (must run before drupal-init.sh)
+  - /opt/fetch-secrets.sh
 
   # Run Drupal initialization
   - /opt/drupal-init.sh

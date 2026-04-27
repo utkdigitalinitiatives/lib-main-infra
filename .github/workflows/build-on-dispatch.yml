@@ -22,7 +22,7 @@ env:
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
   ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   TF_VAR_admin_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
-  TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+  # DB admin password is now sourced from Azure Key Vault via data source
   TF_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
   TF_VAR_gallery_resource_group_name: ${{ vars.GALLERY_RESOURCE_GROUP }}
   TF_VAR_subnet_id: ${{ vars.SUBNET_ID }}
@@ -188,12 +188,18 @@ jobs:
           PROD_HOST: drupal-production-psql.postgres.database.azure.com
           DEVTEST_HOST: ${{ vars.DEVTEST_DB_HOST }}
           DB_USER: drupaladmin
-          DB_PASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
           DB_NAME: drupal
         run: |
           # Install PostgreSQL client
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
+
+          # Fetch DB admin password from Key Vault. Both production and devtest
+          # PSQL servers share the same admin password today, so we fetch one.
+          KV_NAME=$(az keyvault list -g lib-main-secrets-rg --query "[0].name" -o tsv)
+          DB_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" \
+            --name production-db-admin-password --query value -o tsv)
+          echo "::add-mask::$DB_PASSWORD"
 
           echo "Dumping production database..."
           PGPASSWORD="$DB_PASSWORD" pg_dump \

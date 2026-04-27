@@ -91,6 +91,13 @@ data "azurerm_key_vault_secret" "db_admin_password" {
   key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
 }
 
+# Allow the VMSS managed identity to read secrets from the shared vault at boot.
+resource "azurerm_role_assignment" "vmss_kv_secrets_user" {
+  scope                = data.terraform_remote_state.secrets.outputs.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = module.vmss.vmss_identity_principal_id
+}
+
 # Data source: Get image version from Azure Compute Gallery
 data "azurerm_shared_image_version" "drupal" {
   count               = var.use_gallery_image ? 1 : 0
@@ -250,7 +257,8 @@ module "vmss" {
     db_host               = module.postgresql.fqdn
     db_name               = module.postgresql.database_name
     db_user               = var.db_admin_username
-    db_password           = var.db_admin_password
+    kv_name               = data.terraform_remote_state.secrets.outputs.key_vault_name
+    env_name              = local.environment
     storage_account       = module.blob_storage.storage_account_name
     storage_container     = module.blob_storage.container_name
     storage_endpoint      = module.blob_storage.primary_blob_endpoint

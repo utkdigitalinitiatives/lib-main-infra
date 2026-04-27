@@ -74,12 +74,6 @@ variable "db_admin_username" {
   default     = "drupaladmin"
 }
 
-variable "db_admin_password" {
-  description = "PostgreSQL administrator password"
-  type        = string
-  sensitive   = true
-}
-
 variable "db_name" {
   description = "Name of the Drupal database"
   type        = string

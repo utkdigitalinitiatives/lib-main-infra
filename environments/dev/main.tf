@@ -50,6 +50,26 @@ resource "random_password" "drupal_hash_salt" {
   special = true
 }
 
+# Shared Key Vault provisioned by environments/secrets/.
+data "terraform_remote_state" "secrets" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = "lib-main-tfstate-rg"
+    storage_account_name = "libmaintfstate5a6e642c"
+    container_name       = "tfstate"
+    key                  = "secrets/terraform.tfstate"
+  }
+}
+
+# Allow the dev VM managed identity to read secrets from the shared vault at boot.
+# The dev VM connects to the devtest PostgreSQL server, so it reads
+# devtest-db-admin-password.
+resource "azurerm_role_assignment" "dev_vm_kv_secrets_user" {
+  scope                = data.terraform_remote_state.secrets.outputs.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = module.dev_vm.vm_identity_principal_id
+}
+
 # Data source: Get image version from Azure Compute Gallery
 data "azurerm_shared_image_version" "drupal" {
   name                = var.image_version
@@ -127,7 +147,8 @@ module "dev_vm" {
     db_host         = var.devtest_db_host
     db_name         = var.db_name
     db_user         = var.db_admin_username
-    db_password     = var.db_admin_password
+    kv_name         = data.terraform_remote_state.secrets.outputs.key_vault_name
+    env_name        = "devtest"
     hash_salt       = random_password.drupal_hash_salt.result
     storage_account   = var.devtest_storage_account
     storage_key       = var.devtest_storage_key
