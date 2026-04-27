@@ -27,7 +27,8 @@ write_files:
       ];
 
       // Hash salt for security
-      $settings['hash_salt'] = '${hash_salt}';
+      // Substituted at boot by /opt/fetch-secrets.sh (Key Vault).
+      $settings['hash_salt'] = '__HASH_SALT__';
 
       // Trusted host patterns
       $settings['trusted_host_patterns'] = [
@@ -76,6 +77,7 @@ write_files:
 
       KV_NAME="${kv_name}"
       ENV_NAME="${env_name}"
+      HASH_SALT_SECRET="${hash_salt_secret_name}"
       ENV_PHP="/etc/drupal/environment.php"
       SECRETS_ENV="/etc/drupal/secrets.env"
       LOG_FILE="/var/log/drupal-init.log"
@@ -100,29 +102,32 @@ write_files:
 
       # Retry: RBAC role propagation can lag a few seconds after VMSS boot.
       DB_PASSWORD=""
+      HASH_SALT=""
       for attempt in 1 2 3 4 5 6; do
         TOKEN=$(get_token || true)
         if [ -n "$TOKEN" ]; then
           DB_PASSWORD=$(fetch_secret "$ENV_NAME-db-admin-password" "$TOKEN" || true)
-          [ -n "$DB_PASSWORD" ] && break
+          HASH_SALT=$(fetch_secret "$HASH_SALT_SECRET" "$TOKEN" || true)
+          [ -n "$DB_PASSWORD" ] && [ -n "$HASH_SALT" ] && break
         fi
         log "Secret fetch attempt $attempt failed; retrying in 10s..."
         sleep 10
       done
 
-      if [ -z "$DB_PASSWORD" ]; then
-        log "ERROR: could not fetch $ENV_NAME-db-admin-password from $KV_NAME"
+      if [ -z "$DB_PASSWORD" ] || [ -z "$HASH_SALT" ]; then
+        log "ERROR: could not fetch required secrets from $KV_NAME"
         exit 1
       fi
 
-      # Substitute placeholder in environment.php. Use python rather than sed
-      # so '/' '&' '|' in the password don't need escaping.
-      DB_PASSWORD="$DB_PASSWORD" python3 - "$ENV_PHP" <<'PYEOF'
+      # Substitute placeholders in environment.php. Use python rather than sed
+      # so '/' '&' '|' in values don't need escaping.
+      DB_PASSWORD="$DB_PASSWORD" HASH_SALT="$HASH_SALT" python3 - "$ENV_PHP" <<'PYEOF'
       import os, sys
       path = sys.argv[1]
       with open(path) as f:
           content = f.read()
       content = content.replace('__DB_PASSWORD__', os.environ['DB_PASSWORD'])
+      content = content.replace('__HASH_SALT__', os.environ['HASH_SALT'])
       with open(path, 'w') as f:
           f.write(content)
       PYEOF

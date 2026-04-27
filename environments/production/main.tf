@@ -98,6 +98,23 @@ resource "azurerm_role_assignment" "vmss_kv_secrets_user" {
   principal_id         = module.vmss.vmss_identity_principal_id
 }
 
+# Persist the hash salt and Drupal admin password to Key Vault so they can be
+# retrieved without TF state access (e.g., for admin login or to rebuild a VM).
+# Values are mirrored from the existing random_password resources; no rotation.
+resource "azurerm_key_vault_secret" "drupal_hash_salt" {
+  name         = "production-drupal-hash-salt"
+  value        = random_password.drupal_hash_salt.result
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+  content_type = "text/plain"
+}
+
+resource "azurerm_key_vault_secret" "drupal_admin_password" {
+  name         = "production-drupal-admin-password"
+  value        = var.drupal_admin_password != null ? var.drupal_admin_password : random_password.drupal_admin.result
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+  content_type = "text/plain"
+}
+
 # Data source: Get image version from Azure Compute Gallery
 data "azurerm_shared_image_version" "drupal" {
   count               = var.use_gallery_image ? 1 : 0
@@ -259,6 +276,7 @@ module "vmss" {
     db_user               = var.db_admin_username
     kv_name               = data.terraform_remote_state.secrets.outputs.key_vault_name
     env_name              = local.environment
+    hash_salt_secret_name = azurerm_key_vault_secret.drupal_hash_salt.name
     storage_account       = module.blob_storage.storage_account_name
     storage_container     = module.blob_storage.container_name
     storage_endpoint      = module.blob_storage.primary_blob_endpoint
@@ -267,7 +285,6 @@ module "vmss" {
     # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
     # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.
     storage_sas_token = replace(data.azurerm_storage_account_sas.media_read.sas, "%", "\\%")
-    hash_salt             = random_password.drupal_hash_salt.result
     lb_fqdn               = module.load_balancer.public_ip_fqdn
     drupal_admin_password = var.drupal_admin_password != null ? var.drupal_admin_password : random_password.drupal_admin.result
     drupal_site_uuid      = var.drupal_site_uuid

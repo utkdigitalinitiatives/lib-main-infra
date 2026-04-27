@@ -70,6 +70,14 @@ resource "azurerm_role_assignment" "dev_vm_kv_secrets_user" {
   principal_id         = module.dev_vm.vm_identity_principal_id
 }
 
+# Persist the dev VM's hash salt to KV so it survives state churn.
+resource "azurerm_key_vault_secret" "drupal_hash_salt" {
+  name         = "dev-drupal-hash-salt"
+  value        = random_password.drupal_hash_salt.result
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+  content_type = "text/plain"
+}
+
 # Data source: Get image version from Azure Compute Gallery
 data "azurerm_shared_image_version" "drupal" {
   name                = var.image_version
@@ -149,7 +157,7 @@ module "dev_vm" {
     db_user         = var.db_admin_username
     kv_name         = data.terraform_remote_state.secrets.outputs.key_vault_name
     env_name        = "devtest"
-    hash_salt       = random_password.drupal_hash_salt.result
+    hash_salt_secret_name = azurerm_key_vault_secret.drupal_hash_salt.name
     storage_account   = var.devtest_storage_account
     storage_key       = var.devtest_storage_key
     # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
