@@ -1,0 +1,24 @@
+variable "subscription_id" {
+  description = "Azure subscription ID"
+  type        = string
+}
+
+variable "location" {
+  description = "Azure region for the Key Vault"
+  type        = string
+  default     = "eastus2"
+}
+
+variable "gh_actions_sp_object_id" {
+  description = <<-EOT
+    Object ID (not Application/Client ID) of the lib-main-github-actions service principal.
+    Fetch with: az ad sp show --id 3e3f4430-45ef-4206-81d0-0c912fc5e158 --query id -o tsv
+  EOT
+  type        = string
+}
+
+variable "operator_object_ids" {
+  description = "AAD object IDs of human operators that should have read/write access to all KV secrets."
+  type        = list(string)
+  default     = []
+}

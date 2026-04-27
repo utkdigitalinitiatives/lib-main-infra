@@ -74,6 +74,23 @@ resource "azurerm_resource_group" "production" {
   tags     = local.common_tags
 }
 
+# Shared Key Vault provisioned by environments/secrets/.
+# Read its outputs so consumers don't need to know the name's random suffix.
+data "terraform_remote_state" "secrets" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = "lib-main-tfstate-rg"
+    storage_account_name = "libmaintfstate5a6e642c"
+    container_name       = "tfstate"
+    key                  = "secrets/terraform.tfstate"
+  }
+}
+
+data "azurerm_key_vault_secret" "db_admin_password" {
+  name         = "production-db-admin-password"
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+}
+
 # Data source: Get image version from Azure Compute Gallery
 data "azurerm_shared_image_version" "drupal" {
   count               = var.use_gallery_image ? 1 : 0
@@ -126,7 +143,7 @@ module "postgresql" {
   sku_name                     = var.postgresql_sku
   storage_mb                   = var.postgresql_storage_mb
   administrator_login          = var.db_admin_username
-  administrator_password       = var.db_admin_password
+  administrator_password       = data.azurerm_key_vault_secret.db_admin_password.value
   database_name                = var.db_name
   postgresql_version           = var.postgresql_version
   backup_retention_days        = 14
