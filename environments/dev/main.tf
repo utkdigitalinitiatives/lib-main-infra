@@ -50,6 +50,40 @@ resource "random_password" "drupal_hash_salt" {
   special = true
 }
 
+# Shared Key Vault provisioned by environments/secrets/.
+data "terraform_remote_state" "secrets" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = "lib-main-tfstate-rg"
+    storage_account_name = "libmaintfstate5a6e642c"
+    container_name       = "tfstate"
+    key                  = "secrets/terraform.tfstate"
+  }
+}
+
+# Allow the dev VM managed identity to read secrets from the shared vault at boot.
+# The dev VM connects to the devtest PostgreSQL server, so it reads
+# devtest-db-admin-password.
+resource "azurerm_role_assignment" "dev_vm_kv_secrets_user" {
+  scope                = data.terraform_remote_state.secrets.outputs.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = module.dev_vm.vm_identity_principal_id
+}
+
+# Persist the dev VM's hash salt to KV so it survives state churn.
+resource "azurerm_key_vault_secret" "drupal_hash_salt" {
+  name         = "dev-drupal-hash-salt"
+  value        = random_password.drupal_hash_salt.result
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+  content_type = "text/plain"
+}
+
+# Read the devtest storage account key from KV. Provisioned by environments/devtest/.
+data "azurerm_key_vault_secret" "devtest_storage_key" {
+  name         = "devtest-storage-account-key"
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+}
+
 # Data source: Get image version from Azure Compute Gallery
 data "azurerm_shared_image_version" "drupal" {
   name                = var.image_version
@@ -60,7 +94,7 @@ data "azurerm_shared_image_version" "drupal" {
 
 # SAS token for Apache reverse proxy to serve blob storage files (read-only, 2-year expiry)
 data "azurerm_storage_account_sas" "media_read" {
-  connection_string = "DefaultEndpointsProtocol=https;AccountName=${var.devtest_storage_account};AccountKey=${var.devtest_storage_key};EndpointSuffix=core.windows.net"
+  connection_string = "DefaultEndpointsProtocol=https;AccountName=${var.devtest_storage_account};AccountKey=${data.azurerm_key_vault_secret.devtest_storage_key.value};EndpointSuffix=core.windows.net"
   https_only        = true
   start             = "2026-01-01T00:00:00Z"
   expiry            = "2028-01-01T00:00:00Z"
@@ -127,10 +161,11 @@ module "dev_vm" {
     db_host         = var.devtest_db_host
     db_name         = var.db_name
     db_user         = var.db_admin_username
-    db_password     = var.db_admin_password
-    hash_salt       = random_password.drupal_hash_salt.result
+    kv_name         = data.terraform_remote_state.secrets.outputs.key_vault_name
+    env_name        = "devtest"
+    hash_salt_secret_name = azurerm_key_vault_secret.drupal_hash_salt.name
     storage_account   = var.devtest_storage_account
-    storage_key       = var.devtest_storage_key
+    storage_key_secret_name = data.azurerm_key_vault_secret.devtest_storage_key.name
     # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
     # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
     # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.

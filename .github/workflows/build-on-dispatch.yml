@@ -22,7 +22,7 @@ env:
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
   ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   TF_VAR_admin_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
-  TF_VAR_db_admin_password: ${{ secrets.DB_ADMIN_PASSWORD }}
+  # DB admin password is now sourced from Azure Key Vault via data source
   TF_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
   TF_VAR_gallery_resource_group_name: ${{ vars.GALLERY_RESOURCE_GROUP }}
   TF_VAR_subnet_id: ${{ vars.SUBNET_ID }}
@@ -188,12 +188,18 @@ jobs:
           PROD_HOST: drupal-production-psql.postgres.database.azure.com
           DEVTEST_HOST: ${{ vars.DEVTEST_DB_HOST }}
           DB_USER: drupaladmin
-          DB_PASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
           DB_NAME: drupal
         run: |
           # Install PostgreSQL client
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
+
+          # Fetch DB admin password from Key Vault. Both production and devtest
+          # PSQL servers share the same admin password today, so we fetch one.
+          KV_NAME=$(az keyvault list -g lib-main-secrets-rg --query "[0].name" -o tsv)
+          DB_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" \
+            --name production-db-admin-password --query value -o tsv)
+          echo "::add-mask::$DB_PASSWORD"
 
           echo "Dumping production database..."
           PGPASSWORD="$DB_PASSWORD" pg_dump \
@@ -306,15 +312,6 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
-      - name: Get devtest storage key
-        run: |
-          KEY=$(az storage account keys list \
-            --account-name "${{ vars.DEVTEST_STORAGE_ACCOUNT }}" \
-            --resource-group lib-main-devtest-rg \
-            --query "[0].value" -o tsv)
-          echo "::add-mask::$KEY"
-          echo "TF_VAR_devtest_storage_key=$KEY" >> $GITHUB_ENV
-
       - name: Terraform Init
         working-directory: environments/dev
         run: |
@@ -388,14 +385,23 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "After verifying the dev site, create a PR from dev to main to deploy to production." >> $GITHUB_STEP_SUMMARY
 
+      - name: Fetch Postmark token from Key Vault
+        if: always() && steps.outputs.outputs.public_ip != ''
+        run: |
+          KV_NAME=$(az keyvault list -g lib-main-secrets-rg --query "[0].name" -o tsv)
+          TOKEN=$(az keyvault secret show --vault-name "$KV_NAME" \
+            --name shared-postmark-api-token --query value -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "POSTMARK_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
       - name: Email Notification - Dev VM Ready
         if: always() && steps.outputs.outputs.public_ip != ''
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.postmarkapp.com
           server_port: 587
-          username: ${{ secrets.POSTMARK_API_TOKEN }}
-          password: ${{ secrets.POSTMARK_API_TOKEN }}
+          username: ${{ env.POSTMARK_TOKEN }}
+          password: ${{ env.POSTMARK_TOKEN }}
           subject: "Dev VM Ready - ${{ steps.outputs.outputs.public_ip }}"
           to: wveale@utk.edu,aalbro@utk.edu,mcheeti1@utk.edu,dshaw11@utk.edu
           from: "lib-main-infra <wveale@utk.edu>"
