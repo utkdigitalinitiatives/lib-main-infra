@@ -1,23 +1,24 @@
 # ------------------------------------------------------------------------------
-# Dev Environment
+# Dev Environment — Ephemeral validation VM (CI-driven; do not apply locally)
 # ------------------------------------------------------------------------------
-# Shared dev environment for dev-branch validation. Creates:
-#   - Resource Group: lib-main-dev-rg (shared, not per-PR)
-#   - Dev VM: Single instance for validation
+# What this stack owns (in lib-main-dev-rg):
+#   - A single Drupal VM, replaced on every lib-main dev-branch merge
 #
-# Database is provided by the permanent devtest PostgreSQL instance,
-# synced from production by the CI/CD workflow before deployment.
+# Backing services come from environments/devtest/:
+#   - PostgreSQL:     var.devtest_db_host -> drupal-devtest-psql.postgres.database.azure.com
+#   - Blob storage:   var.devtest_storage_account -> drupaldevtest05q0a0t6
+#   - Storage key + hash salt: read from the shared Key Vault (lib-main-kv-*)
 #
-# Workflow:
-#   1. Developer merges PR to dev branch in lib-main
-#   2. Push to dev triggers repository_dispatch (drupal-dev-merge)
-#   3. Packer builds image with dev branch code
-#   4. Production DB synced to devtest PostgreSQL
-#   5. Dev VM deployed with new image for validation
-#   6. Developer merges dev → main
-#   7. Push to main triggers production deploy and dev VM cleanup
+# Lifecycle (fully automated by GitHub Actions — do not run terraform locally):
+#   1. Push to lib-main `dev` branch triggers repository_dispatch (drupal-dev-merge)
+#   2. build-on-dispatch.yml: Packer builds new image, prod DB synced into
+#      devtest PostgreSQL, blob assets synced into devtest storage, then THIS
+#      stack is `terraform apply`-ed to deploy the VM with the new image.
+#   3. Developer validates the dev VM, then merges dev -> main.
+#   4. deploy-on-main-merge.yml: production deploys, then THIS stack is
+#      `terraform destroy`-ed.
 #
-# State: dev/terraform.tfstate (single shared state)
+# State key: dev/terraform.tfstate
 # ------------------------------------------------------------------------------
 
 terraform {

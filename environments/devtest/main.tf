@@ -1,15 +1,20 @@
 # ------------------------------------------------------------------------------
-# DevTest Environment
+# DevTest Environment — Persistent backing services for environments/dev/
 # ------------------------------------------------------------------------------
-# Permanent infrastructure shared across all PR pipelines:
-#   - Resource Group: lib-main-devtest-rg
-#   - PostgreSQL: Burstable instance synced from production before each stage
-#   - Automation: Weekly auto-stop to manage costs
+# What this stack owns (all in lib-main-devtest-rg):
+#   - PostgreSQL Flexible Server: drupal-devtest-psql (Burstable B1ms)
+#   - Blob storage account:       drupaldevtest05q0a0t6 (drupal-media container)
+#   - Automation Account:         lib-main-devtest-automation (weekly auto-stop)
 #
-# This environment is deployed once and persists across PRs.
-# The database is synced from production by the CI/CD workflow
-# before each dev/test stage, so each stage gets a fresh copy
-# of production data.
+# Lifecycle: applied manually, set-and-forget. These resources persist
+# indefinitely and are NOT touched by any CI/CD workflow.
+#
+# Consumer: environments/dev/ (the ephemeral dev VM) connects to the PostgreSQL
+# server above and reads its storage account key from Key Vault. This stack
+# writes `devtest-storage-account-key` to KV for that purpose.
+#
+# Database refresh: the dev-merge workflow runs pg_dump from production and
+# pg_restore into this server before each dev VM deploy.
 #
 # State key: devtest/terraform.tfstate
 # ------------------------------------------------------------------------------

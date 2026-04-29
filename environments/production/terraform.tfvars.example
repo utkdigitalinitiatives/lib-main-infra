@@ -1,0 +1,31 @@
+# Copy to terraform.tfvars (gitignored) and fill in real values.
+
+subscription_id = "9fc717ef-b8c4-4858-a677-7c7b518616a0"
+
+# Your SSH public key (e.g., ~/.ssh/id_ed25519.pub or id_rsa.pub).
+# This becomes drupaladmin's authorized_keys on the VMSS instances.
+# This user becomes the only authorized key on the VMSS and requires a rolling update. 
+# Plans to change this to cloud-init based in the future.
+admin_ssh_public_key = "REPLACE_WITH_YOUR_SSH_PUBLIC_KEY"
+
+# Fixed site UUID — must match config/system.site.yml in lib-main.
+# Do not regenerate; changing this breaks Drupal config sync.
+drupal_site_uuid = "d89bc65b-241b-4515-9d1e-11193be5ce9a"
+
+# Image Gallery
+use_gallery_image           = true
+gallery_name                = "lib_main_gallery"
+gallery_resource_group_name = "lib-main-images-rg"
+image_version               = "1.0.0"
+
+# Load Balancer
+lb_dns_label = "lib-main"
+enable_https = true
+domain_name  = "libdev1.lib.utk.edu"
+
+# Existing public IP (managed outside this stack, in dns-test-rg).
+public_ip_id = "/subscriptions/9fc717ef-b8c4-4858-a677-7c7b518616a0/resourceGroups/dns-test-rg/providers/Microsoft.Network/publicIPAddresses/libdev1"
+
+# Set false on the very first apply (before VMSS exists), then flip to true
+# on a second apply to create the VMSS → blob storage role assignment.
+enable_vmss_blob_access = true
