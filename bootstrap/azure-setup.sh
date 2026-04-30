@@ -1,4 +1,53 @@
 #!/bin/bash
+# ==============================================================================
+# HISTORICAL REFERENCE — DO NOT RUN AS-IS
+# ==============================================================================
+# This script bootstrapped the original lib-main-infra deployment in early 2026.
+# It is preserved as a starting point for future fresh deploys, NOT as a
+# currently-correct runbook. The infrastructure has evolved past it in several
+# ways since it was last exercised:
+#
+#   - DB_ADMIN_PASSWORD is no longer a GitHub secret. DB passwords, hash salts,
+#     storage keys, and the Postmark token now live in the shared Key Vault
+#     provisioned by environments/secrets/. Workflows fetch them at runtime via
+#     `az keyvault secret show`. The output at the bottom of this script is
+#     misleading on this point.
+#
+#   - environments/secrets/ requires the GitHub Actions SP's *object ID* (not
+#     the clientId/appId this script outputs) to grant Key Vault Secrets
+#     Officer. Look it up with: `az ad sp show --id <appId> --query id -o tsv`.
+#
+#   - Rocky Linux marketplace terms must be accepted before Packer can build.
+#     See bootstrap/marketplace-agreement/ — apply that Terraform before the
+#     first image build.
+#
+#   - lib-main-production-rg is created here, but environments/production/
+#     also tries to create it, which forces a `terraform import` on first
+#     apply. Consider letting Terraform own the RG instead.
+#
+#   - `az ad sp create-for-rbac --sdk-auth` is deprecated in current Azure CLI.
+#
+#   - The summary at the end does not list all GitHub variables needed today
+#     (LB_DNS_LABEL, DEVTEST_DB_HOST, DEVTEST_STORAGE_ACCOUNT, DRUPAL_SITE_UUID,
+#     DOMAIN_NAME, PUBLIC_IP_ID, SUBNET_ID — many of which come from later
+#     Terraform applies).
+#
+# Before running, audit each section against the current state of the repo
+# (CLAUDE.md, README.md, environments/secrets/main.tf in particular) and
+# update accordingly. The current high-level deploy order is:
+#   1. Bootstrap RGs, gallery, image defs, TF state storage, SP (this script,
+#      after edits)
+#   2. Accept Rocky Linux marketplace terms (bootstrap/marketplace-agreement/)
+#   3. Apply environments/secrets/
+#   4. Manually seed Key Vault: production-db-admin-password,
+#      devtest-db-admin-password, shared-postmark-api-token
+#   5. Apply environments/devtest/
+#   6. Apply environments/production/ and environments/dev/
+#   7. Run base-image-build.yml workflow
+# ==============================================================================
+#
+# Original header below, preserved for context:
+#
 # Azure Infrastructure Bootstrap Script for lib-main-infra
 # This script sets up the foundational Azure resources needed before
 # Terraform can manage the infrastructure.

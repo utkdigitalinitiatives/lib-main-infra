@@ -59,38 +59,44 @@ This infrastructure repo works with the [lib-main](https://github.com/utkdigital
 
 ### Initial Setup
 
-1. **Bootstrap Azure resources** (one-time):
-   ```bash
-   cd bootstrap
-   chmod +x azure-setup.sh
-   ./azure-setup.sh
-   ```
+The current production environment was bootstrapped once in early 2026 and is not torn down. The steps below are for setting up a *new* deployment from scratch.
 
-2. **Configure GitHub secrets** (see output from bootstrap script):
+`bootstrap/azure-setup.sh` is preserved as a historical reference for the original deploy but has drifted from current architecture (Key Vault, marketplace terms, deprecated CLI flags). **Audit it against this README and the header in the script before running.** Plan on hand-running the equivalent steps rather than executing it blindly.
+
+1. **Foundational Azure resources** — resource groups (`lib-main-images-rg`, `lib-main-tfstate-rg`), the Compute Gallery (`lib_main_gallery`) with `drupal-base-rocky-linux-9` and `drupal-rocky-linux-9` image definitions, the Terraform state storage account + `tfstate` container, and the `lib-main-github-actions` service principal. See `bootstrap/azure-setup.sh` for the original commands.
+
+2. **Accept Rocky Linux marketplace terms** — apply `bootstrap/marketplace-agreement/`. Required before Packer can build the base image.
+
+3. **Apply `environments/secrets/`** — provisions `lib-main-secrets-rg` and the shared Key Vault. Needs the GitHub Actions SP's *object ID* (`az ad sp show --id <appId> --query id -o tsv`) for the role assignment.
+
+4. **Seed manual Key Vault secrets** — `production-db-admin-password`, `devtest-db-admin-password`, `shared-postmark-api-token`. The TF-managed secrets (Drupal admin password, hash salts, storage keys) populate themselves on subsequent applies.
+
+5. **Apply `environments/devtest/`, then `environments/production/` and `environments/dev/`** — dev reads `devtest-storage-account-key` from the vault, so devtest must apply first.
+
+6. **Configure GitHub secrets**:
    - `AZURE_SUBSCRIPTION_ID`
    - `AZURE_TENANT_ID`
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`
    - `SSH_PUBLIC_KEY`
 
-   Application secrets (DB passwords, hash salts, storage keys, Postmark token) live in the shared Key Vault — see [Key Vault](#key-vault) — not in GitHub secrets. Workflows fetch them via `az keyvault secret show` after `azure/login`.
+   Application secrets (DB passwords, hash salts, storage keys, Postmark token) live in the Key Vault — see [Key Vault](#key-vault) — not in GitHub secrets. Workflows fetch them via `az keyvault secret show` after `azure/login`.
 
-3. **Configure GitHub variables**:
+7. **Configure GitHub variables**:
    - `GALLERY_NAME`: `lib_main_gallery`
    - `GALLERY_RESOURCE_GROUP`: `lib-main-images-rg`
    - `LOCATION`: `eastus2`
    - `TF_STATE_RESOURCE_GROUP`: `lib-main-tfstate-rg`
-   - `TF_STATE_STORAGE_ACCOUNT`: (from bootstrap output)
-   - `SUBNET_ID`: (created after first Terraform apply)
+   - `TF_STATE_STORAGE_ACCOUNT`: (from step 1)
+   - `SUBNET_ID`: (from production Terraform output)
    - `LB_DNS_LABEL`: `lib-main` (or preferred DNS label)
-   - `DEVTEST_DB_HOST`: (created after devtest Terraform apply)
-   - `DEVTEST_STORAGE_ACCOUNT`: (created after devtest Terraform apply)
-   - `DRUPAL_SITE_UUID`: Fixed Drupal site UUID for config sync
+   - `DEVTEST_DB_HOST`: (from devtest Terraform output)
+   - `DEVTEST_STORAGE_ACCOUNT`: (from devtest Terraform output)
+   - `DRUPAL_SITE_UUID`: Fixed Drupal site UUID for config sync (`uuidgen`)
    - `DOMAIN_NAME`: Public domain for the application (e.g., `libdev1.lib.utk.edu`)
    - `PUBLIC_IP_ID`: Resource ID of the external public IP attached to the load balancer
 
-4. **Build base image first**:
-   Run `base-image-build.yml` workflow manually before any PR workflow.
+8. **Build base image** — run `base-image-build.yml` manually before any dispatch-driven workflow.
 
 ## CI/CD Workflows
 
