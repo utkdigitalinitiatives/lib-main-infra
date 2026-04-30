@@ -7,7 +7,7 @@ Infrastructure as Code for the lib-main Drupal application.
 This repository contains the Azure infrastructure for running a Drupal 11 application:
 
 - **Azure Load Balancer** → **VMSS** (Rocky Linux 9) → **PostgreSQL Flexible Server**
-- **Azure Blob Storage** for Drupal media (via the `az_blob_fs` Drupal module — native Azure Blob PHP SDK, no Java/S3Proxy)
+- **Azure Blob Storage** for Drupal media (via the `az_blob_fs` Drupal module — native Azure Blob PHP SDK)
 - **Azure Key Vault** for shared secrets (DB passwords, hash salts, storage keys, Postmark token)
 - **Azure Compute Gallery** for Packer-built images
 
