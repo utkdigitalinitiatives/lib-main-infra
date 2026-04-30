@@ -7,7 +7,8 @@ Infrastructure as Code for the lib-main Drupal application.
 This repository contains the Azure infrastructure for running a Drupal 11 application:
 
 - **Azure Load Balancer** → **VMSS** (Rocky Linux 9) → **PostgreSQL Flexible Server**
-- **Azure Blob Storage** (via S3Proxy for S3FS module compatibility)
+- **Azure Blob Storage** for Drupal media (via the `az_blob_fs` Drupal module — native Azure Blob PHP SDK, no Java/S3Proxy)
+- **Azure Key Vault** for shared secrets (DB passwords, hash salts, storage keys, Postmark token)
 - **Azure Compute Gallery** for Packer-built images
 
 ### Repository Structure
@@ -28,9 +29,10 @@ lib-main-infra/
 │   └── ansible/
 │       ├── playbook-base.yml       # Base provisioning
 │       ├── playbook.yml            # App provisioning
-│       └── templates/              # Jinja2 templates (Apache, PHP-FPM, S3Proxy)
+│       └── templates/              # Jinja2 templates (Apache, PHP-FPM)
 ├── modules/                         # Reusable Terraform modules
 ├── environments/
+│   ├── secrets/                     # Shared Key Vault (apply first)
 │   ├── production/                  # Production environment
 │   ├── devtest/                     # Permanent shared PostgreSQL + Automation
 │   └── dev/                         # Shared dev validation
@@ -41,11 +43,10 @@ lib-main-infra/
 
 This infrastructure repo works with the [lib-main](https://github.com/utkdigitalinitiatives/lib-main) Drupal codebase:
 
-1. Developers create feature branches, open PRs to the `dev` branch
-2. When a PR is merged to `dev`, lib-main sends a `drupal-dev-merge` dispatch to this repo
-3. This repo builds a Packer image and deploys a dev VM for validation
-4. When `dev` is merged to `main`, lib-main sends a `drupal-main-merge` dispatch
-5. This repo deploys the latest image to production and cleans up the dev VM
+1. On push to `dev` in lib-main, a `drupal-dev-merge` dispatch is sent to this repo
+2. This repo builds a Packer image and deploys the shared dev VM for validation
+3. On push to `main` in lib-main, a `drupal-main-merge` dispatch is sent to this repo
+4. This repo deploys the latest image to production and cleans up the dev VM
 
 ## Quick Start
 
@@ -71,7 +72,8 @@ This infrastructure repo works with the [lib-main](https://github.com/utkdigital
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`
    - `SSH_PUBLIC_KEY`
-   - `DB_ADMIN_PASSWORD`
+
+   Application secrets (DB passwords, hash salts, storage keys, Postmark token) live in the shared Key Vault — see [Key Vault](#key-vault) — not in GitHub secrets. Workflows fetch them via `az keyvault secret show` after `azure/login`.
 
 3. **Configure GitHub variables**:
    - `GALLERY_NAME`: `lib_main_gallery`
@@ -82,24 +84,13 @@ This infrastructure repo works with the [lib-main](https://github.com/utkdigital
    - `SUBNET_ID`: (created after first Terraform apply)
    - `LB_DNS_LABEL`: `lib-main` (or preferred DNS label)
    - `DEVTEST_DB_HOST`: (created after devtest Terraform apply)
+   - `DEVTEST_STORAGE_ACCOUNT`: (created after devtest Terraform apply)
    - `DRUPAL_SITE_UUID`: Fixed Drupal site UUID for config sync
+   - `DOMAIN_NAME`: Public domain for the application (e.g., `libdev1.lib.utk.edu`)
+   - `PUBLIC_IP_ID`: Resource ID of the external public IP attached to the load balancer
 
 4. **Build base image first**:
    Run `base-image-build.yml` workflow manually before any PR workflow.
-
-### Local Development
-
-```bash
-# Initialize Terraform
-cd environments/production
-terraform init -backend=false
-
-# Validate configuration
-terraform validate
-
-# Plan changes (with backend disabled)
-terraform plan -var="subscription_id=..." -var="admin_ssh_public_key=..." ...
-```
 
 ## CI/CD Workflows
 
@@ -139,9 +130,29 @@ get-image-version → deploy-production → cleanup-dev
 |----------------|---------|
 | `lib-main-images-rg` | Azure Compute Gallery and Packer resources |
 | `lib-main-tfstate-rg` | Terraform state storage |
+| `lib-main-secrets-rg` | Shared Key Vault (`lib-main-kv-4ad11abb`) |
 | `lib-main-production-rg` | Production infrastructure |
 | `lib-main-devtest-rg` | Permanent shared PostgreSQL + Automation |
 | `lib-main-dev-rg` | Shared dev validation resources |
+
+## Key Vault
+
+Application secrets are stored in `lib-main-kv-4ad11abb` (in `lib-main-secrets-rg`), provisioned by `environments/secrets/`. RBAC mode, purge protection enabled, 90-day soft delete.
+
+| Secret | Used by |
+|--------|---------|
+| `production-db-admin-password` | Production PSQL + VMSS cloud-init + DB sync workflows |
+| `devtest-db-admin-password` | DevTest PSQL + dev VM cloud-init + DB sync workflows |
+| `production-drupal-admin-password` | Mirror of Terraform-managed Drupal admin password |
+| `production-drupal-hash-salt` | Production VMSS cloud-init |
+| `dev-drupal-hash-salt` | Dev VM cloud-init |
+| `production-storage-account-key` | Production VMSS cloud-init (blob access) |
+| `devtest-storage-account-key` | Dev VM cloud-init + dev env data source |
+| `shared-postmark-api-token` | Email notification workflows |
+
+VMSS and dev VM managed identities have `Key Vault Secrets User`; cloud-init fetches secrets via IMDS at boot and substitutes them into `/etc/drupal/environment.php`. GitHub Actions SP and operators have `Key Vault Secrets Officer`.
+
+**Apply order**: `secrets` → `devtest` → `production` / `dev` (dev reads `devtest-storage-account-key`, so devtest must apply first).
 
 ## License
 
