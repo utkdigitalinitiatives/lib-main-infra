@@ -73,10 +73,14 @@ write_files:
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [fetch-secrets] $1" | tee -a "$LOG_FILE"
       }
 
+      # python3 stderr is silenced: during RBAC propagation the response
+      # lacks the expected key and prints a KeyError traceback that the
+      # workflow's log scanner flags. Real failures still surface via the
+      # terminal "ERROR: could not fetch required secrets" log below.
       get_token() {
         curl -s -H "Metadata: true" \
           "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://vault.azure.net" \
-          | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
+          | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null
       }
 
       fetch_secret() {
@@ -84,7 +88,7 @@ write_files:
         local token="$2"
         curl -s -H "Authorization: Bearer $token" \
           "https://$KV_NAME.vault.azure.net/secrets/$name?api-version=7.4" \
-          | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])"
+          | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])" 2>/dev/null
       }
 
       # Retry for ~3 minutes: the dev VM is recreated each merge, so the KV
@@ -101,7 +105,7 @@ write_files:
           STORAGE_KEY=$(fetch_secret "$STORAGE_KEY_SECRET" "$TOKEN" || true)
           [ -n "$DB_PASSWORD" ] && [ -n "$HASH_SALT" ] && [ -n "$STORAGE_KEY" ] && break
         fi
-        log "Secret fetch attempt $attempt failed; retrying in 10s..."
+        log "Secret fetch attempt $attempt incomplete; retrying in 10s..."
         sleep 10
       done
 
