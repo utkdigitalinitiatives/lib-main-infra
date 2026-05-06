@@ -3,6 +3,12 @@ variable "environment" {
   type        = string
 }
 
+variable "disable_defender_for_storage" {
+  description = "Set true to opt this storage account out of Defender for Storage (overrides subscription default)"
+  type        = bool
+  default     = false
+}
+
 variable "resource_group_name" {
   description = "Name of the resource group"
   type        = string

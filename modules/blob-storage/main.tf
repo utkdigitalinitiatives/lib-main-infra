@@ -20,6 +20,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.57"
     }
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -87,6 +91,30 @@ resource "azurerm_storage_account" "drupal" {
   }
 
   tags = local.common_tags
+}
+
+# Per-resource Defender for Storage override (opt-out for non-prod accounts)
+resource "azapi_resource" "defender_for_storage" {
+  count     = var.disable_defender_for_storage ? 1 : 0
+  type      = "Microsoft.Security/DefenderForStorageSettings@2022-12-01-preview"
+  name      = "current"
+  parent_id = azurerm_storage_account.drupal.id
+
+  body = {
+    properties = {
+      isEnabled                         = false
+      overrideSubscriptionLevelSettings = true
+      malwareScanning = {
+        onUpload = {
+          isEnabled     = false
+          capGBPerMonth = -1
+        }
+      }
+      sensitiveDataDiscovery = {
+        isEnabled = false
+      }
+    }
+  }
 }
 
 # Blob container for Drupal media files
