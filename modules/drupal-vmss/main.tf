@@ -42,6 +42,13 @@ resource "azurerm_linux_virtual_machine_scale_set" "drupal" {
   sku                 = var.vm_size
   instances           = var.instance_count
 
+  # Required when MaxSurge is enabled on the rolling upgrade policy: the surge
+  # path creates a brand-new instance and deletes the old one once healthy, so
+  # provisioning extra instances up front is incompatible (provider rejects the
+  # apply otherwise). Steady-state stays at instance_count; a 2nd VM exists only
+  # during a deploy.
+  overprovision = false
+
   admin_username                  = var.admin_username
   disable_password_authentication = true
 
@@ -113,6 +120,11 @@ resource "azurerm_linux_virtual_machine_scale_set" "drupal" {
   upgrade_mode = "Rolling"
 
   rolling_upgrade_policy {
+    # MaxSurge: upgrade stands up a new healthy instance before deleting the old
+    # one, so a single-instance scale set has no empty-backend-pool window during
+    # a deploy. Health gating is provided by the ApplicationHealthLinux extension
+    # above. Requires overprovision = false (set on the resource).
+    maximum_surge_instances_enabled         = true
     max_batch_instance_percent              = 20
     max_unhealthy_instance_percent          = 20
     max_unhealthy_upgraded_instance_percent = 5
@@ -141,6 +153,13 @@ resource "azurerm_linux_virtual_machine_scale_set" "drupal" {
   lifecycle {
     ignore_changes = [
       instances, # Managed by autoscaler
+      # AzureMonitorLinuxAgent is injected out-of-band by Defender's
+      # DeployIfNotExists auto-provisioning. Without this, every apply plans to
+      # remove it and Defender re-adds it — a perpetual drift loop (and a brief
+      # monitoring gap each cycle). Ignoring the extension set still lets TF
+      # create HealthExtension on first apply but stops reconciling extension
+      # drift afterward; HealthExtension config is stable (port 80 / /health).
+      extension,
     ]
   }
 }
