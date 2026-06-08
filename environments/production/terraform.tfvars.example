@@ -16,7 +16,7 @@ drupal_site_uuid = "d89bc65b-241b-4515-9d1e-11193be5ce9a"
 use_gallery_image           = true
 gallery_name                = "lib_main_gallery"
 gallery_resource_group_name = "lib-main-images-rg"
-image_version               = "1.0.0"
+image_version               = "0.0.65"  # gallery version to deploy (pin to current prod); CI passes the built version, 'latest'/'recent' keywords also accepted
 
 # Load Balancer
 lb_dns_label = "lib-main"
@@ -29,3 +29,22 @@ public_ip_id = "/subscriptions/9fc717ef-b8c4-4858-a677-7c7b518616a0/resourceGrou
 # Set false on the very first apply (before VMSS exists), then flip to true
 # on a second apply to create the VMSS → blob storage role assignment.
 enable_vmss_blob_access = true
+
+# --- Solr (asimov AKS) integration ---
+# Object ID (principalId, NOT clientId) of asimov's ESO user-assigned MI.
+# Granted Key Vault Secrets User on the shared vault so ESO can sync the
+# four solr-* secrets into the cluster.
+#   az identity show --resource-group rg-asimov --name id-asimov-eso \
+#     --query principalId -o tsv
+asimov_eso_principal_id = "1c62fb68-bdf4-428e-875c-f1abd77a172e"
+
+# Pinned private IP for Solr's internal Azure LB inside the asimov AKS VNet.
+# Confirm free before applying:
+#   az network nic list -g MC_rg-asimov_Asimov_eastus2 \
+#     --query "[].ipConfigurations[].privateIPAddress" -o tsv \
+#     | grep -F 10.224.255.10 || echo free
+solr_internal_lb_ip = "10.224.255.10"
+
+# Defaults (override only if asimov VNet is renamed):
+# asimov_vnet_name           = "aks-vnet-36013409"
+# asimov_vnet_resource_group = "MC_rg-asimov_Asimov_eastus2"
