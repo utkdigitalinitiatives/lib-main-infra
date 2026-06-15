@@ -159,18 +159,26 @@ module "dev_vm" {
 
   # Pass database connection info via cloud-init (uses permanent devtest PostgreSQL)
   custom_data = templatefile("${path.module}/cloud-init.tftpl", {
-    db_host         = var.devtest_db_host
-    db_name         = var.db_name
-    db_user         = var.db_admin_username
-    kv_name         = data.terraform_remote_state.secrets.outputs.key_vault_name
-    env_name        = "devtest"
-    hash_salt_secret_name = azurerm_key_vault_secret.drupal_hash_salt.name
-    storage_account   = var.devtest_storage_account
+    db_host                 = var.devtest_db_host
+    db_name                 = var.db_name
+    db_user                 = var.db_admin_username
+    kv_name                 = data.terraform_remote_state.secrets.outputs.key_vault_name
+    env_name                = "devtest"
+    hash_salt_secret_name   = azurerm_key_vault_secret.drupal_hash_salt.name
+    storage_account         = var.devtest_storage_account
     storage_key_secret_name = data.azurerm_key_vault_secret.devtest_storage_key.name
     # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
     # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
     # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.
     storage_sas_token = replace(data.azurerm_storage_account_sas.media_read.sas, "%", "\\%")
+    # Solr search backend (dev collection + scoped credential)
+    solr_host                 = var.solr_host
+    solr_port                 = var.solr_port
+    solr_path                 = var.solr_path
+    solr_core                 = var.solr_core
+    solr_username             = var.solr_username
+    solr_password_secret_name = var.solr_password_secret_name
+    drupal_search_server_id   = var.drupal_search_server_id
   })
 
   tags = {

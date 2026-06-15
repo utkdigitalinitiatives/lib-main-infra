@@ -236,15 +236,15 @@ variable "solr_path" {
 }
 
 variable "solr_core" {
-  description = "Solr core / collection name backing this site's index."
+  description = "Solr collection backing the production index. Must match the security.json collection glob (mainsite_*) or queries return 403."
   type        = string
-  default     = "mainsite"
+  default     = "mainsite_prod"
 }
 
 variable "solr_username" {
-  description = "Solr basic-auth username scoped to this site's collection."
+  description = "Solr basic-auth username scoped to the production collection (mainsite_prod)."
   type        = string
-  default     = "drupal-mainsite"
+  default     = "drupal-mainsite-prod"
 }
 
 variable "drupal_search_server_id" {

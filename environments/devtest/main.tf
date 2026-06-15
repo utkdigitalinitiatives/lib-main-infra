@@ -27,6 +27,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.57"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   backend "azurerm" {}
@@ -74,6 +78,25 @@ data "azurerm_key_vault_secret" "db_admin_password" {
 resource "azurerm_key_vault_secret" "storage_account_key" {
   name         = "devtest-storage-account-key"
   value        = module.blob_storage.primary_access_key
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+  content_type = "text/plain"
+}
+
+# Dev site's Solr connector password. Owned here (the persistent devtest stack)
+# rather than environments/dev/ because the dev VM is destroyed on every
+# main-merge; a password owned by that ephemeral stack would regenerate each
+# deploy and desync the Solr security.json already bootstrapped into ZooKeeper.
+# The dev VM reads this by name at boot via its managed identity; asimov's
+# External Secrets Operator syncs it into the cluster to build security.json.
+resource "random_password" "solr_drupal_mainsite_dev" {
+  length           = 32
+  special          = true
+  override_special = "!@#%^&*-_=+?"
+}
+
+resource "azurerm_key_vault_secret" "solr_drupal_mainsite_dev_password" {
+  name         = "dev-solr-drupal-mainsite-password"
+  value        = random_password.solr_drupal_mainsite_dev.result
   key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
   content_type = "text/plain"
 }

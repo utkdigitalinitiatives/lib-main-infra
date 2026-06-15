@@ -152,7 +152,7 @@ resource "random_password" "solr_operator" {
   override_special = "!@#%^&*-_=+?"
 }
 
-resource "random_password" "solr_drupal_mainsite" {
+resource "random_password" "solr_drupal_mainsite_prod" {
   length           = 32
   special          = true
   override_special = "!@#%^&*-_=+?"
@@ -179,9 +179,9 @@ resource "azurerm_key_vault_secret" "solr_operator_password" {
   content_type = "text/plain"
 }
 
-resource "azurerm_key_vault_secret" "solr_drupal_mainsite_password" {
-  name         = "production-solr-drupal-mainsite-password"
-  value        = random_password.solr_drupal_mainsite.result
+resource "azurerm_key_vault_secret" "solr_drupal_mainsite_prod_password" {
+  name         = "production-solr-drupal-mainsite-prod-password"
+  value        = random_password.solr_drupal_mainsite_prod.result
   key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
   content_type = "text/plain"
 }
@@ -520,7 +520,7 @@ module "vmss" {
     solr_path                 = var.solr_path
     solr_core                 = var.solr_core
     solr_username             = var.solr_username
-    solr_password_secret_name = azurerm_key_vault_secret.solr_drupal_mainsite_password.name
+    solr_password_secret_name = azurerm_key_vault_secret.solr_drupal_mainsite_prod_password.name
     drupal_search_server_id   = var.drupal_search_server_id
   })
 
