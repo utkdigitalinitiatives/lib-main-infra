@@ -26,6 +26,23 @@ write_files:
         'prefix' => '',
       ];
 
+      // --- TEMPORARY: D10 news migration source (Pantheon MySQL). Remove after migration. ---
+      // Overrides the placeholder $databases['migrate'] declared in settings.php
+      // (utkdigitalinitiatives/lib-main#132). Values are substituted at boot by
+      // /opt/fetch-secrets.sh IF the 'migrate-pantheon-db' Key Vault secret exists;
+      // if it doesn't, the __MIGRATE_DB_*__ placeholders remain (inert — the connection
+      // is only ever opened by an explicit `drush migrate:*` run).
+      $databases['migrate']['default'] = [
+        'database'  => '__MIGRATE_DB_NAME__',
+        'username'  => '__MIGRATE_DB_USER__',
+        'password'  => '__MIGRATE_DB_PASS__',
+        'host'      => '__MIGRATE_DB_HOST__',
+        'port'      => '__MIGRATE_DB_PORT__',
+        'driver'    => 'mysql',
+        'namespace' => 'Drupal\\Core\\Database\\Driver\\mysql',
+        'prefix'    => '',
+      ];
+
       // Hash salt for security
       // Substituted at boot by /opt/fetch-secrets.sh (Key Vault).
       $settings['hash_salt'] = '__HASH_SALT__';
@@ -150,6 +167,39 @@ write_files:
       EOF
       chmod 640 "$SECRETS_ENV"
       chown root:drupal "$SECRETS_ENV"
+
+      # --- TEMPORARY: Pantheon migration source creds (OPTIONAL — must never block boot) ---
+      # Only substitutes if the 'migrate-pantheon-db' secret exists in KV. A missing or
+      # failed fetch is NOT an error here. Secret value is JSON:
+      #   {"database":..,"username":..,"password":..,"host":..,"port":..}
+      MIGRATE_TOKEN=$(get_token || true)
+      MIGRATE_JSON=""
+      if [ -n "$MIGRATE_TOKEN" ]; then
+        MIGRATE_JSON=$(fetch_secret "migrate-pantheon-db" "$MIGRATE_TOKEN" || true)
+      fi
+      if [ -n "$MIGRATE_JSON" ]; then
+        # Wrapped in if/then so a malformed secret logs a warning instead of
+        # aborting the VMSS boot under `set -e` (prod boot must never be blocked
+        # by this optional migration wiring).
+        if MIGRATE_JSON="$MIGRATE_JSON" python3 - "$ENV_PHP" 2>/dev/null <<'PYEOF'
+      import os, sys, json
+      path = sys.argv[1]
+      creds = json.loads(os.environ['MIGRATE_JSON'])
+      with open(path) as f:
+          content = f.read()
+      for token, field in [('NAME', 'database'), ('USER', 'username'), ('PASS', 'password'), ('HOST', 'host'), ('PORT', 'port')]:
+          content = content.replace('__MIGRATE_DB_' + token + '__', str(creds[field]))
+      with open(path, 'w') as f:
+          f.write(content)
+      PYEOF
+        then
+          log "Migrate (Pantheon) source DB credentials injected"
+        else
+          log "WARNING: migrate-pantheon-db present but could not be applied (malformed JSON?); continuing boot"
+        fi
+      else
+        log "No migrate-pantheon-db secret; migration source not configured (normal outside migration)"
+      fi
 
       log "Secrets bootstrap complete"
 
