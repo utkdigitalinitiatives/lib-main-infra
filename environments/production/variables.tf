@@ -91,10 +91,14 @@ variable "health_probe_path" {
 }
 
 # VM configuration
+# Burstable v2 (Basv2). Was Standard_B2s (Bs v1), which Azure has placed under
+# capacity growth restrictions from 2026-07-31 and retirement on 2028-07-31.
+# Standard_B2als_v2 is the same 2 vCPU / 4 GiB at a slightly lower rate.
+# Longer term this moves to a D-class size (Standard_D2as_v5).
 variable "vm_size" {
   description = "Size of the VM instances"
   type        = string
-  default     = "Standard_B2s"
+  default     = "Standard_B2als_v2"
 }
 
 variable "admin_username" {
