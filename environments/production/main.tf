@@ -29,6 +29,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.0"
+    }
   }
 
   # Remote backend for CI/CD - values provided via -backend-config
@@ -297,6 +301,32 @@ resource "azurerm_storage_share" "drupal_private" {
   storage_account_id = azurerm_storage_account.private_files.id
   quota              = 100
   access_tier        = "TransactionOptimized"
+}
+
+# Defender for Storage override (same pattern as modules/blob-storage): the
+# subscription-level plan bills per account, but its malware scanning only hooks
+# blob uploads — this account's sole data path is the SMB share, which Defender
+# cannot scan. The blob-based media account stays enrolled.
+resource "azapi_resource" "private_files_defender_off" {
+  type      = "Microsoft.Security/DefenderForStorageSettings@2022-12-01-preview"
+  name      = "current"
+  parent_id = azurerm_storage_account.private_files.id
+
+  body = {
+    properties = {
+      isEnabled                         = false
+      overrideSubscriptionLevelSettings = true
+      malwareScanning = {
+        onUpload = {
+          isEnabled     = false
+          capGBPerMonth = -1
+        }
+      }
+      sensitiveDataDiscovery = {
+        isEnabled = false
+      }
+    }
+  }
 }
 
 # Mirror the private-files account key into KV so cloud-init can fetch it via
