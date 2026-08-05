@@ -141,6 +141,27 @@ get-image-version → deploy-production → cleanup-dev
 | `lib-main-devtest-rg` | Permanent shared PostgreSQL + Automation |
 | `lib-main-dev-rg` | Shared dev validation resources |
 
+## Production VNet addressing
+
+`drupal-production-vnet` is `10.20.0.0/16` (web subnet `10.20.1.0/24`, private
+endpoints subnet `10.20.2.0/24`), the range reserved for lib-main in the
+[mccarthy-infra](https://github.com/utkdigitalinitiatives/mccarthy-infra#vnet-address-allocation)
+allocation table.
+
+Do not move it back into `10.0.0.0/16`: that range is the Kubernetes **service
+CIDR** of the Asimov AKS cluster, which this VNet peers with for SolrCloud.
+Azure validates only VNet address spaces when peering, so an overlap with the
+service CIDR appears to work — but ClusterIPs are allocated from that range, and
+reply traffic to a VM inside it can be intercepted by kube-proxy on the cluster
+nodes. Microsoft documents service-CIDR overlap with a peered network as
+unsupported, and `serviceCidr` is immutable after cluster creation. `10.1.0.0/16`
+is also off-limits: the already-peered `vireo-db` spoke partly occupies it.
+
+Azure applies address-space changes in place, but only against empty subnets:
+the VMSS must be scaled to 0 first, and the move needs a transitional apply
+carrying both address spaces before the old one can be dropped. Consult the
+allocation table before any change.
+
 ## Key Vault
 
 Application secrets are stored in `lib-main-kv-4ad11abb` (in `lib-main-secrets-rg`), provisioned by `environments/secrets/`. RBAC mode, purge protection enabled, 90-day soft delete.

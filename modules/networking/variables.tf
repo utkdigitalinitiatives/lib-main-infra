@@ -16,19 +16,19 @@ variable "location" {
 variable "vnet_address_space" {
   description = "Address space for the VNet"
   type        = list(string)
-  default     = ["10.0.0.0/16"]
+  default     = ["10.20.0.0/16"]
 }
 
 variable "web_subnet_address_prefix" {
   description = "Address prefix for the web subnet (VMSS Blue/Green)"
   type        = string
-  default     = "10.0.1.0/24"
+  default     = "10.20.1.0/24"
 }
 
 variable "private_endpoints_subnet_address_prefix" {
   description = "Address prefix for private endpoints subnet (PostgreSQL, Blob)"
   type        = string
-  default     = "10.0.10.0/24"
+  default     = "10.20.2.0/24"
 }
 
 variable "allowed_ssh_cidr_blocks" {
