@@ -42,21 +42,21 @@ variable "image_version" {
 
 # Networking
 variable "vnet_address_space" {
-  description = "Address space for the VNet"
+  description = "Address space for the VNet (10.20.0.0/16 is reserved for lib-main in the mccarthy-infra allocation table; 10.0.0.0/16 collides with the Asimov AKS service CIDR)"
   type        = list(string)
-  default     = ["10.0.0.0/16"]
+  default     = ["10.20.0.0/16"]
 }
 
 variable "web_subnet_prefix" {
   description = "Address prefix for the web subnet"
   type        = string
-  default     = "10.0.1.0/24"
+  default     = "10.20.1.0/24"
 }
 
 variable "private_endpoints_prefix" {
   description = "Address prefix for private endpoints subnet"
   type        = string
-  default     = "10.0.2.0/24"
+  default     = "10.20.2.0/24"
 }
 
 variable "allowed_ssh_cidr_blocks" {
