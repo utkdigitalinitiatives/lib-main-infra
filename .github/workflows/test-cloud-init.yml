@@ -21,28 +21,29 @@ on:
   workflow_dispatch:
     inputs:
       image_version:
-        description: "Existing image version from gallery (e.g., 0.0.42)"
+        description: 'Existing image version from gallery (e.g., 0.0.42)'
         required: true
         type: string
       environment:
-        description: "Which environment to deploy"
+        description: 'Which environment to deploy'
         required: true
-        default: "dev"
+        default: 'dev'
         type: choice
         options:
           - dev
       sync_database:
-        description: "Sync production DB to devtest before deploy"
+        description: 'Sync production DB to devtest before deploy'
         required: false
         default: true
         type: boolean
       destroy_only:
-        description: "Only destroy resources (skip deploy)"
+        description: 'Only destroy resources (skip deploy)'
         required: false
         default: false
         type: boolean
 
 env:
+  # Safety net: force any JS action still declaring node20 onto the node24 runtime
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -64,15 +65,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4.0.0
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
 
       - name: Azure CLI Login
-        uses: azure/login@v3.0.0
+        uses: azure/login@v3
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 

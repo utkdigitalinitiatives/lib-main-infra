@@ -3,23 +3,24 @@ name: Build Base Image
 on:
   # Monthly rebuild on the 1st at 00:00 UTC
   schedule:
-    - cron: "0 0 1 * *"
+    - cron: '0 0 1 * *'
   # Manual trigger
   workflow_dispatch:
     inputs:
       image_version:
-        description: "Base image version (e.g., 1.0.0)"
+        description: 'Base image version (e.g., 1.0.0)'
         required: true
         type: string
   # Trigger on changes to base image files
   push:
     branches: [main]
     paths:
-      - "packer/drupal-base-rocky9.pkr.hcl"
-      - "packer/ansible/playbook-base.yml"
-      - "packer/ansible/templates/**"
+      - 'packer/drupal-base-rocky9.pkr.hcl'
+      - 'packer/ansible/playbook-base.yml'
+      - 'packer/ansible/templates/**'
 
 env:
+  # Safety net: force any JS action still declaring node20 onto the node24 runtime
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -35,10 +36,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Setup Packer
-        uses: hashicorp/setup-packer@v3.2.0
+        uses: hashicorp/setup-packer@v3
         with:
           version: latest
 
@@ -117,7 +118,7 @@ jobs:
 
       - name: Azure CLI Login (for Key Vault access on failure)
         if: failure()
-        uses: azure/login@v3.0.0
+        uses: azure/login@v3
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
@@ -132,7 +133,7 @@ jobs:
 
       - name: Email Notification - Base Image Build Failed
         if: failure()
-        uses: dawidd6/action-send-mail@v17
+        uses: dawidd6/action-send-mail@v18
         with:
           server_address: smtp.postmarkapp.com
           server_port: 587

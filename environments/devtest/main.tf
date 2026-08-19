@@ -107,6 +107,8 @@ module "blob_storage" {
   soft_delete_retention_days = 7
   enable_versioning          = false
 
+  disable_defender_for_storage = true
+
   # Per-developer isolated media containers + RBAC for azcopy sync.
   # AAD object IDs collected via: az ad user show --id <email> --query id -o tsv
   developer_identities = {

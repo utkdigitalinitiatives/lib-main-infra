@@ -14,12 +14,12 @@ on:
   workflow_dispatch:
     inputs:
       cleanup_only:
-        description: "Only destroy dev VM, skip production deploy"
+        description: 'Only destroy dev VM, skip production deploy'
         required: false
         default: false
         type: boolean
       image_version:
-        description: "Override image version (optional, queries gallery if empty)"
+        description: 'Override image version (optional, queries gallery if empty)'
         required: false
         type: string
 
@@ -28,6 +28,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # Safety net: force any JS action still declaring node20 onto the node24 runtime
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -45,7 +46,7 @@ jobs:
 
     steps:
       - name: Azure CLI Login
-        uses: azure/login@v3.0.0
+        uses: azure/login@v3
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
@@ -97,15 +98,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Azure CLI Login
-        uses: azure/login@v3.0.0
+        uses: azure/login@v3
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4.0.0
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
 
@@ -203,7 +204,7 @@ jobs:
 
       - name: Email Notification - Production Deploy
         if: always() && steps.vmss.outputs.application_url != ''
-        uses: dawidd6/action-send-mail@v17
+        uses: dawidd6/action-send-mail@v18
         with:
           server_address: smtp.postmarkapp.com
           server_port: 587
@@ -241,15 +242,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4.0.0
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
 
-      - name: Azure Login
-        uses: azure/login@v3.0.0
+      - name: Azure CLI Login
+        uses: azure/login@v3
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 

@@ -30,7 +30,7 @@ output "application_url" {
   description = "URL to access the Drupal application"
   value = var.domain_name != null ? (
     var.enable_https ? "https://${var.domain_name}" : "http://${var.domain_name}"
-  ) : (
+    ) : (
     module.load_balancer.public_ip_fqdn != null ? "http://${module.load_balancer.public_ip_fqdn}" : null
   )
 }

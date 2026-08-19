@@ -29,6 +29,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.0"
+    }
   }
 
   # Remote backend for CI/CD - values provided via -backend-config
@@ -250,6 +254,90 @@ resource "azurerm_storage_container" "tls_certs" {
   container_access_type = "private"
 }
 
+# Azure Files share backing Drupal's private:// filesystem (editor-only webform/media uploads).
+# Mounted over /var/www/drupal/private on each VMSS instance at boot (see cloud-init
+# /opt/mount-private-files.sh). Replaces the ephemeral per-instance local dir with durable,
+# shared storage so private uploads survive VMSS reimages/rolling deploys and stay consistent
+# across the surge instances during a zero-downtime deploy. Served only through Drupal's
+# access-controlled /system/files/ route — never via the public /drupal-media/ SAS proxy.
+#
+# Deliberately on its own storage account rather than module.blob_storage: SMB requires
+# shared-key auth, so a share on the media account would pin shared-key access there
+# (blocking its planned move to MI-only auth), and the media account's key/SAS exist to
+# serve public content — a dedicated account keeps one consumer per credential, lets the
+# two keys rotate independently, and lets backup/retention policy differ.
+resource "random_string" "private_files_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+resource "azurerm_storage_account" "private_files" {
+  name                = "drupalprivate${random_string.private_files_suffix.result}"
+  resource_group_name = azurerm_resource_group.production.name
+  location            = var.location
+
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  account_kind             = "StorageV2"
+
+  min_tls_version                 = "TLS1_2"
+  allow_nested_items_to_be_public = false
+  # CIFS/SMB authenticates with the account key; MI/OAuth is not an option for kernel mounts.
+  shared_access_key_enabled = true
+
+  # Share-level soft delete (accidental share deletion; file-level restore via snapshots)
+  share_properties {
+    retention_policy {
+      days = 7
+    }
+  }
+
+  tags = local.common_tags
+}
+
+resource "azurerm_storage_share" "drupal_private" {
+  name               = "drupal-private"
+  storage_account_id = azurerm_storage_account.private_files.id
+  quota              = 100
+  access_tier        = "TransactionOptimized"
+}
+
+# Defender for Storage override (same pattern as modules/blob-storage): the
+# subscription-level plan bills per account, but its malware scanning only hooks
+# blob uploads — this account's sole data path is the SMB share, which Defender
+# cannot scan. The blob-based media account stays enrolled.
+resource "azapi_resource" "private_files_defender_off" {
+  type      = "Microsoft.Security/DefenderForStorageSettings@2022-12-01-preview"
+  name      = "current"
+  parent_id = azurerm_storage_account.private_files.id
+
+  body = {
+    properties = {
+      isEnabled                         = false
+      overrideSubscriptionLevelSettings = true
+      malwareScanning = {
+        onUpload = {
+          isEnabled     = false
+          capGBPerMonth = -1
+        }
+      }
+      sensitiveDataDiscovery = {
+        isEnabled = false
+      }
+    }
+  }
+}
+
+# Mirror the private-files account key into KV so cloud-init can fetch it via
+# managed identity at boot (same pattern as production-storage-account-key).
+resource "azurerm_key_vault_secret" "private_files_storage_key" {
+  name         = "production-private-files-storage-key"
+  value        = azurerm_storage_account.private_files.primary_access_key
+  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
+  content_type = "text/plain"
+}
+
 # VMSS: Single instance with rolling updates
 module "vmss" {
   source = "../../modules/drupal-vmss"
@@ -281,20 +369,24 @@ module "vmss" {
 
   # Cloud-init with database, storage, and Drupal configuration
   custom_data = templatefile("${path.module}/cloud-init.tftpl", {
-    db_host               = module.postgresql.fqdn
-    db_name               = module.postgresql.database_name
-    db_user               = var.db_admin_username
-    kv_name               = data.terraform_remote_state.secrets.outputs.key_vault_name
-    env_name              = local.environment
-    hash_salt_secret_name = azurerm_key_vault_secret.drupal_hash_salt.name
-    storage_account       = module.blob_storage.storage_account_name
-    storage_container     = module.blob_storage.container_name
-    storage_endpoint      = module.blob_storage.primary_blob_endpoint
+    db_host                 = module.postgresql.fqdn
+    db_name                 = module.postgresql.database_name
+    db_user                 = var.db_admin_username
+    kv_name                 = data.terraform_remote_state.secrets.outputs.key_vault_name
+    env_name                = local.environment
+    hash_salt_secret_name   = azurerm_key_vault_secret.drupal_hash_salt.name
+    storage_account         = module.blob_storage.storage_account_name
+    storage_container       = module.blob_storage.container_name
+    storage_endpoint        = module.blob_storage.primary_blob_endpoint
     storage_key_secret_name = azurerm_key_vault_secret.storage_account_key.name
+    # Azure Files share mounted over /var/www/drupal/private (durable private:// backing)
+    private_files_account         = azurerm_storage_account.private_files.name
+    private_files_share           = azurerm_storage_share.drupal_private.name
+    private_files_key_secret_name = azurerm_key_vault_secret.private_files_storage_key.name
     # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
     # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
     # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.
-    storage_sas_token = replace(data.azurerm_storage_account_sas.media_read.sas, "%", "\\%")
+    storage_sas_token     = replace(data.azurerm_storage_account_sas.media_read.sas, "%", "\\%")
     lb_fqdn               = module.load_balancer.public_ip_fqdn
     drupal_admin_password = var.drupal_admin_password != null ? var.drupal_admin_password : random_password.drupal_admin.result
     drupal_site_uuid      = var.drupal_site_uuid

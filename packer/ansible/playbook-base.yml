@@ -81,6 +81,8 @@
           - htop
           - curl
           - wget
+          # CIFS client for mounting Azure Files (durable private:// storage)
+          - cifs-utils
           # SELinux tools
           - policycoreutils-python-utils
           - setools-console
