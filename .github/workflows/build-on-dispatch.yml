@@ -17,6 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Safety net: force any JS action still declaring node20 onto the node24 runtime
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -40,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout infrastructure code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate dispatch payload
         run: |
@@ -61,7 +63,7 @@ jobs:
           echo "Building image version: 0.0.${{ github.run_number }}"
 
       - name: Setup Packer
-        uses: hashicorp/setup-packer@main
+        uses: hashicorp/setup-packer@v3
         with:
           version: latest
 
@@ -300,10 +302,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
 
@@ -396,7 +398,7 @@ jobs:
 
       - name: Email Notification - Dev VM Ready
         if: always() && steps.outputs.outputs.public_ip != ''
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v18
         with:
           server_address: smtp.postmarkapp.com
           server_port: 587

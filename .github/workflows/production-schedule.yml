@@ -21,6 +21,8 @@ jobs:
     name: ${{ (github.event_name == 'workflow_dispatch' && inputs.action) || (github.event.schedule == '30 11 * * 1-5' && 'start') || 'stop' }} production
     runs-on: ubuntu-latest
     env:
+      # Safety net: force any JS action still declaring node20 onto the node24 runtime
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       ACTION: ${{ (github.event_name == 'workflow_dispatch' && inputs.action) || (github.event.schedule == '30 11 * * 1-5' && 'start') || 'stop' }}
     steps:
       - name: Azure Login
