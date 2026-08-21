@@ -36,3 +36,4 @@ backend.hcl
 
 # Setup progress (temporary)
 SETUP-PROGRESS.md
+__pycache__/
