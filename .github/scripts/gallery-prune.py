@@ -29,11 +29,13 @@ GALLERY = "lib_main_gallery"
 RESOURCE_GROUP = "lib-main-images-rg"
 
 # How many recent versions to keep for rollback, beyond whatever is live.
-DEFAULT_KEEP_NEWEST = 10
+DEFAULT_KEEP_NEWEST = 5
 KEEP_NEWEST_OVERRIDES = {
     # Base images build ~1/month and app builds always use the newest, so a
     # deep history buys nothing. App definitions build ~14/month and keep the
-    # default, which is a few weeks of rollback.
+    # default, which is roughly a week and a half of rollback. Each retained
+    # version costs ~$3/month in gallery storage, which is why the default is
+    # this tight; raise it if a wider rollback window is worth the spend.
     "drupal-base-rocky-linux-9": 3,
 }
 
