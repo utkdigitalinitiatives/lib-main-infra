@@ -86,7 +86,7 @@ jobs:
             --gallery-name ${{ vars.GALLERY_NAME }} \
             --gallery-image-definition drupal-base-rocky-linux-9 \
             --resource-group ${{ vars.GALLERY_RESOURCE_GROUP }} \
-            --query "sort_by([].name, &@)[-1]" -o tsv)
+            --query "sort_by([], &publishingProfile.publishedDate)[-1].name" -o tsv)
 
           if [ -z "$VERSION" ]; then
             echo "::error::No base image found in gallery. Run base-image-build.yml first."
