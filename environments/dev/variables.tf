@@ -105,7 +105,7 @@ variable "solr_port" {
 variable "solr_path" {
   description = "URL path prefix for Solr."
   type        = string
-  default     = "/solr"
+  default     = "/"
 }
 
 variable "solr_core" {
