@@ -129,80 +129,13 @@ resource "azurerm_key_vault_secret" "storage_account_key" {
   content_type = "text/plain"
 }
 
-# Solr basic-auth passwords. Generated here (TF is the only writer) and
-# consumed by the asimov ESO, which syncs them into Kubernetes Secrets.
-# A bootstrap Job in asimov then injects them into Solr via set-user.
-# Restricted special set so curl JSON in the bootstrap Job doesn't choke on
-# quotes/backslashes — same pattern as random_password.drupal_admin above.
-resource "random_password" "solr_admin" {
-  length           = 32
-  special          = true
-  override_special = "!@#%^&*-_=+?"
-}
-
-resource "random_password" "solr_internal" {
-  length           = 32
-  special          = true
-  override_special = "!@#%^&*-_=+?"
-}
-
-resource "random_password" "solr_operator" {
-  length           = 32
-  special          = true
-  override_special = "!@#%^&*-_=+?"
-}
-
-resource "random_password" "solr_drupal_mainsite_prod" {
-  length           = 32
-  special          = true
-  override_special = "!@#%^&*-_=+?"
-}
-
-resource "azurerm_key_vault_secret" "solr_admin_password" {
-  name         = "production-solr-admin-password"
-  value        = random_password.solr_admin.result
-  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
-  content_type = "text/plain"
-}
-
-resource "azurerm_key_vault_secret" "solr_internal_password" {
-  name         = "production-solr-internal-password"
-  value        = random_password.solr_internal.result
-  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
-  content_type = "text/plain"
-}
-
-resource "azurerm_key_vault_secret" "solr_operator_password" {
-  name         = "production-solr-operator-password"
-  value        = random_password.solr_operator.result
-  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
-  content_type = "text/plain"
-}
-
-resource "azurerm_key_vault_secret" "solr_drupal_mainsite_prod_password" {
-  name         = "production-solr-drupal-mainsite-prod-password"
-  value        = random_password.solr_drupal_mainsite_prod.result
-  key_vault_id = data.terraform_remote_state.secrets.outputs.key_vault_id
-  content_type = "text/plain"
-}
-
-# Allow the asimov External Secrets Operator MI to read all four solr secrets
-# from the shared vault. Scoped at the vault level (matches existing VMSS
-# grant); Azure RBAC propagation is 1-2 min after apply.
-resource "azurerm_role_assignment" "asimov_eso_kv_secrets_user" {
-  scope                = data.terraform_remote_state.secrets.outputs.key_vault_id
-  role_definition_name = "Key Vault Secrets User"
-  principal_id         = var.asimov_eso_principal_id
-}
-
 # Data source: Get image version from Azure Compute Gallery
 data "azurerm_shared_image_version" "drupal" {
-  count                   = var.use_gallery_image ? 1 : 0
-  name                    = var.image_version
-  sort_versions_by_semver = true
-  image_name              = var.image_name
-  gallery_name            = var.gallery_name
-  resource_group_name     = var.gallery_resource_group_name
+  count               = var.use_gallery_image ? 1 : 0
+  name                = var.image_version
+  image_name          = var.image_name
+  gallery_name        = var.gallery_name
+  resource_group_name = var.gallery_resource_group_name
 }
 
 # Networking: VNet, subnets, NSG with Load Balancer rules
@@ -220,61 +153,6 @@ module "networking" {
   allowed_ssh_cidr_blocks                 = var.allowed_ssh_cidr_blocks
 
   tags = local.common_tags
-}
-
-# Peer the Drupal VNet with the asimov AKS VNet so VMSS can reach Solr's
-# internal Azure LB on a private IP. Same subscription, no aliased provider.
-data "azurerm_virtual_network" "asimov" {
-  name                = var.asimov_vnet_name
-  resource_group_name = var.asimov_vnet_resource_group
-}
-
-resource "azurerm_virtual_network_peering" "drupal_to_aks" {
-  name                         = "drupal-to-aks"
-  resource_group_name          = azurerm_resource_group.production.name
-  virtual_network_name         = module.networking.vnet_name
-  remote_virtual_network_id    = data.azurerm_virtual_network.asimov.id
-  allow_virtual_network_access = true
-  allow_forwarded_traffic      = false
-  allow_gateway_transit        = false
-  use_remote_gateways          = false
-}
-
-resource "azurerm_virtual_network_peering" "aks_to_drupal" {
-  name                         = "aks-to-drupal"
-  resource_group_name          = var.asimov_vnet_resource_group
-  virtual_network_name         = var.asimov_vnet_name
-  remote_virtual_network_id    = module.networking.vnet_id
-  allow_virtual_network_access = true
-  allow_forwarded_traffic      = false
-  allow_gateway_transit        = false
-  use_remote_gateways          = false
-}
-
-# Private DNS for the internal Solr endpoint. Linked only to the Drupal VNet
-# so resolution is scoped to the consumer side; asimov pods continue to use
-# their cluster-local Service DNS.
-resource "azurerm_private_dns_zone" "lib_main_internal" {
-  name                = "lib-main.internal"
-  resource_group_name = azurerm_resource_group.production.name
-  tags                = local.common_tags
-}
-
-resource "azurerm_private_dns_zone_virtual_network_link" "drupal" {
-  name                  = "drupal-vnet-link"
-  resource_group_name   = azurerm_resource_group.production.name
-  private_dns_zone_name = azurerm_private_dns_zone.lib_main_internal.name
-  virtual_network_id    = module.networking.vnet_id
-  registration_enabled  = false
-  tags                  = local.common_tags
-}
-
-resource "azurerm_private_dns_a_record" "solr" {
-  name                = "solr"
-  zone_name           = azurerm_private_dns_zone.lib_main_internal.name
-  resource_group_name = azurerm_resource_group.production.name
-  ttl                 = 300
-  records             = [var.solr_internal_lb_ip]
 }
 
 # Load Balancer: Public Standard LB
@@ -514,14 +392,6 @@ module "vmss" {
     drupal_site_uuid      = var.drupal_site_uuid
     domain_name           = var.domain_name
     enable_https          = var.enable_https
-    # Solr search backend
-    solr_host                 = var.solr_host
-    solr_port                 = var.solr_port
-    solr_path                 = var.solr_path
-    solr_core                 = var.solr_core
-    solr_username             = var.solr_username
-    solr_password_secret_name = azurerm_key_vault_secret.solr_drupal_mainsite_prod_password.name
-    drupal_search_server_id   = var.drupal_search_server_id
   })
 
   tags = merge(local.common_tags, {
