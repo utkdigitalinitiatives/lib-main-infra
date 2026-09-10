@@ -11,6 +11,10 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Terraform plan output (regenerable; never commit)
+tfplan
+*.tfplan
+
 # Packer
 packer_cache/
 *.pkrvars.hcl

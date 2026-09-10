@@ -187,3 +187,68 @@ variable "public_ip_id" {
   type        = string
   default     = null
 }
+
+# Solr / asimov AKS integration
+variable "asimov_vnet_name" {
+  description = "Name of the asimov AKS VNet to peer with."
+  type        = string
+  default     = "aks-vnet-36013409"
+}
+
+variable "asimov_vnet_resource_group" {
+  description = "Resource group containing the asimov AKS VNet (the AKS node resource group)."
+  type        = string
+  default     = "MC_rg-asimov_Asimov_eastus2"
+}
+
+variable "asimov_eso_principal_id" {
+  description = <<EOT
+Object ID (principalId, NOT clientId) of the asimov External Secrets Operator user-assigned managed identity. Granted Key Vault Secrets User on the shared vault so ESO can sync Solr passwords into the cluster.
+
+Lookup:
+  az identity show --resource-group rg-asimov --name id-asimov-eso --query principalId -o tsv
+EOT
+  type        = string
+}
+
+variable "solr_internal_lb_ip" {
+  description = "Pinned private IP for the Solr internal Azure LB inside the asimov AKS VNet. Must be free and inside the AKS VNet address space."
+  type        = string
+  default     = "10.224.255.10"
+}
+
+variable "solr_host" {
+  description = "DNS hostname Drupal uses to reach Solr. Resolved by the lib-main.internal private DNS zone to solr_internal_lb_ip."
+  type        = string
+  default     = "solr.lib-main.internal"
+}
+
+variable "solr_port" {
+  description = "Port Drupal uses to reach Solr."
+  type        = string
+  default     = "8983"
+}
+
+variable "solr_path" {
+  description = "URL path prefix for Solr (search_api connector setting)."
+  type        = string
+  default     = "/"
+}
+
+variable "solr_core" {
+  description = "Solr collection backing the production index. Must match the security.json collection glob (mainsite_*) or queries return 403."
+  type        = string
+  default     = "mainsite_prod"
+}
+
+variable "solr_username" {
+  description = "Solr basic-auth username scoped to the production collection (mainsite_prod)."
+  type        = string
+  default     = "drupal-mainsite-prod"
+}
+
+variable "drupal_search_server_id" {
+  description = "Drupal search_api.server.* config entity ID matched by environment.php overrides."
+  type        = string
+  default     = "solr_mainsite"
+}
