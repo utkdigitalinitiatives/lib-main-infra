@@ -91,9 +91,9 @@ variable "devtest_storage_account" {
 # Dev uses its own collection + scoped credential so it cannot touch the
 # production index.
 variable "solr_host" {
-  description = "DNS hostname Drupal uses to reach Solr (resolved by the lib-main.internal private DNS zone shared with production)."
+  description = "DNS hostname Drupal uses to reach Solr (resolved by the search.utklib.internal private DNS zone shared with production)."
   type        = string
-  default     = "solr.lib-main.internal"
+  default     = "solr.search.utklib.internal"
 }
 
 variable "solr_port" {

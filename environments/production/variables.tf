@@ -218,9 +218,9 @@ variable "solr_internal_lb_ip" {
 }
 
 variable "solr_host" {
-  description = "DNS hostname Drupal uses to reach Solr. Resolved by the lib-main.internal private DNS zone to solr_internal_lb_ip."
+  description = "DNS hostname Drupal uses to reach Solr. Resolved by the search.utklib.internal private DNS zone to solr_internal_lb_ip."
   type        = string
-  default     = "solr.lib-main.internal"
+  default     = "solr.search.utklib.internal"
 }
 
 variable "solr_port" {

@@ -254,8 +254,8 @@ resource "azurerm_virtual_network_peering" "aks_to_drupal" {
 # Private DNS for the internal Solr endpoint. Linked only to the Drupal VNet
 # so resolution is scoped to the consumer side; asimov pods continue to use
 # their cluster-local Service DNS.
-resource "azurerm_private_dns_zone" "lib_main_internal" {
-  name                = "lib-main.internal"
+resource "azurerm_private_dns_zone" "search_internal" {
+  name                = "search.utklib.internal"
   resource_group_name = azurerm_resource_group.production.name
   tags                = local.common_tags
 }
@@ -263,7 +263,7 @@ resource "azurerm_private_dns_zone" "lib_main_internal" {
 resource "azurerm_private_dns_zone_virtual_network_link" "drupal" {
   name                  = "drupal-vnet-link"
   resource_group_name   = azurerm_resource_group.production.name
-  private_dns_zone_name = azurerm_private_dns_zone.lib_main_internal.name
+  private_dns_zone_name = azurerm_private_dns_zone.search_internal.name
   virtual_network_id    = module.networking.vnet_id
   registration_enabled  = false
   tags                  = local.common_tags
@@ -271,7 +271,7 @@ resource "azurerm_private_dns_zone_virtual_network_link" "drupal" {
 
 resource "azurerm_private_dns_a_record" "solr" {
   name                = "solr"
-  zone_name           = azurerm_private_dns_zone.lib_main_internal.name
+  zone_name           = azurerm_private_dns_zone.search_internal.name
   resource_group_name = azurerm_resource_group.production.name
   ttl                 = 300
   records             = [var.solr_internal_lb_ip]
