@@ -241,11 +241,21 @@
     # ==========================================================================
     # SELinux configuration
     # ==========================================================================
+    # Defender for Cloud installs MDE.Linux and AzureMonitorLinuxAgent on every new
+    # VM, the Packer build VM too, about 11 minutes after it is created. On the
+    # 2026-10-07 base build, the first task below failed 90 seconds after those
+    # installs started, with "BlockingIOError: [Errno 11] Resource temporarily
+    # unavailable" - most likely the installs holding the SELinux policy store
+    # lock. So each policy change below retries until the lock is free.
     - name: Set SELinux context for web root
       community.general.sefcontext:
         target: "{{ web_root }}(/.*)?"
         setype: httpd_sys_rw_content_t
         state: present
+      register: selinux_result
+      until: selinux_result is succeeded
+      retries: 10
+      delay: 30
 
     - name: Apply SELinux context
       ansible.builtin.command: "restorecon -Rv {{ web_root }}"
@@ -256,12 +266,20 @@
         name: httpd_can_network_connect
         state: true
         persistent: true
+      register: selinux_result
+      until: selinux_result is succeeded
+      retries: 10
+      delay: 30
 
     - name: Allow httpd to connect to database
       ansible.posix.seboolean:
         name: httpd_can_network_connect_db
         state: true
         persistent: true
+      register: selinux_result
+      until: selinux_result is succeeded
+      retries: 10
+      delay: 30
 
     # ==========================================================================
     # Image manifest (captures installed versions for CI/CD readout)

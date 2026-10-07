@@ -207,6 +207,18 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Rolling update completed. Verify the application at the URL above." >> $GITHUB_STEP_SUMMARY
 
+      # az holds the GitHub OIDC token from the last azure/login and must present it
+      # again to get a token for a new resource such as Key Vault. That OIDC token
+      # expires 5 minutes after login (AADSTS700024), so log in again right before
+      # the first Key Vault call that runs after a long step.
+      - name: Azure CLI Login (refresh for Key Vault)
+        if: always() && steps.vmss.outputs.application_url != ''
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Fetch Postmark token from Key Vault
         if: always() && steps.vmss.outputs.application_url != ''
         run: |
