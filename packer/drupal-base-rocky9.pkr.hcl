@@ -77,6 +77,13 @@ build {
     playbook_file = "${path.root}/ansible/playbook-base.yml"
     user          = "packer"
 
+    # Defender for Cloud installs MDE.Linux and AzureMonitorLinuxAgent on every new
+    # VM about 11 minutes after it is created, and the installs hold the rpm and
+    # SELinux locks. Any task that runs in that window can fail (2026-10-07: an
+    # SELinux task once, an EPEL key import once). The playbook is safe to run
+    # twice and Defender is done by the second run, so retry the whole run once.
+    max_retries = 2
+
     extra_arguments = [
       "--extra-vars", "ansible_become=true",
       "--extra-vars", "php_version=${var.php_version}"
