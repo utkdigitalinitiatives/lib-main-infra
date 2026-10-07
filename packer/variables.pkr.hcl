@@ -1,6 +1,10 @@
 # Authentication
+#
+# Builds authenticate through the Azure CLI session: `azure/login` establishes it
+# from a GitHub OIDC token in CI, `az login` locally. There is deliberately no
+# client_secret variable - the CI service principal has no password to pass.
 variable "use_azure_cli_auth" {
-  description = "Use Azure CLI authentication (set to false for service principal)"
+  description = "Use the ambient Azure CLI session (established by azure/login via OIDC in CI)"
   type        = bool
   default     = true
 }
@@ -8,25 +12,6 @@ variable "use_azure_cli_auth" {
 variable "subscription_id" {
   description = "Azure subscription ID"
   type        = string
-}
-
-variable "client_id" {
-  description = "Azure service principal client ID (required when use_azure_cli_auth=false)"
-  type        = string
-  default     = ""
-}
-
-variable "client_secret" {
-  description = "Azure service principal client secret (required when use_azure_cli_auth=false)"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "tenant_id" {
-  description = "Azure tenant ID (required when use_azure_cli_auth=false)"
-  type        = string
-  default     = ""
 }
 
 # Gallery configuration
@@ -75,6 +60,23 @@ variable "location" {
   description = "Azure region for the build VM"
   type        = string
   default     = "eastus2"
+}
+
+# Build inside an existing resource group instead of a throwaway pkr-* one.
+#
+# Left null, Packer creates a pkr-Resource-Group-* per build, which needs
+# resourceGroups/write at SUBSCRIPTION scope. The CI service principal holds
+# Contributor on named resource groups only, so CI always passes this
+# (vars.GALLERY_RESOURCE_GROUP, where the intermediate managed image lands too).
+# Null still works for a local build by someone with subscription rights.
+#
+# A dead build now leaks loose pkrvm/pkrni/pkros resources into this group
+# instead of a whole pkr-* group; packer-cleanup.sh sweep-build-resources
+# handles that shape.
+variable "build_resource_group_name" {
+  description = "Existing resource group to build in. Null = let Packer create a temporary pkr-* group (needs subscription-scope rights)."
+  type        = string
+  default     = null
 }
 
 variable "vm_size" {

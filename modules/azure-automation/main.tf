@@ -42,6 +42,16 @@ resource "azurerm_automation_account" "main" {
   }
 
   tags = local.common_tags
+
+  lifecycle {
+    ignore_changes = [
+      # OIT governance owns these tags: a CostCenter policy (modify) and Event
+      # Grid auto-tagging on every create/update. Ours still apply on create.
+      tags["CostCenter"],
+      tags["CreatorUPN"], tags["CreatorName"], tags["CreatorObjectID"], tags["CreationTimeStamp"],
+      tags["LastModifierUPN"], tags["LastModifierName"], tags["LastModifierObjectID"], tags["LastModifiedTimeStamp"],
+    ]
+  }
 }
 
 # Grant the automation identity Contributor on the resource group
@@ -66,6 +76,16 @@ resource "azurerm_automation_runbook" "stop_postgresql" {
   content = file("${path.module}/scripts/Stop-TaggedPostgreSql.ps1")
 
   tags = local.common_tags
+
+  lifecycle {
+    ignore_changes = [
+      # OIT governance owns these tags: a CostCenter policy (modify) and Event
+      # Grid auto-tagging on every create/update. Ours still apply on create.
+      tags["CostCenter"],
+      tags["CreatorUPN"], tags["CreatorName"], tags["CreatorObjectID"], tags["CreationTimeStamp"],
+      tags["LastModifierUPN"], tags["LastModifierName"], tags["LastModifierObjectID"], tags["LastModifiedTimeStamp"],
+    ]
+  }
 }
 
 resource "azurerm_automation_schedule" "weekly_stop" {

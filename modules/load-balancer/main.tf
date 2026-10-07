@@ -25,8 +25,8 @@ terraform {
 }
 
 locals {
-  name_prefix    = "drupal-${var.environment}"
-  actual_pip_id  = var.public_ip_id != null ? var.public_ip_id : azurerm_public_ip.lb[0].id
+  name_prefix   = "drupal-${var.environment}"
+  actual_pip_id = var.public_ip_id != null ? var.public_ip_id : azurerm_public_ip.lb[0].id
   common_tags = merge(var.tags, {
     Environment = var.environment
     ManagedBy   = "terraform"
@@ -48,6 +48,16 @@ resource "azurerm_public_ip" "lb" {
   domain_name_label = var.dns_label != null ? var.dns_label : null
 
   tags = local.common_tags
+
+  lifecycle {
+    ignore_changes = [
+      # OIT governance owns these tags: a CostCenter policy (modify) and Event
+      # Grid auto-tagging on every create/update. Ours still apply on create.
+      tags["CostCenter"],
+      tags["CreatorUPN"], tags["CreatorName"], tags["CreatorObjectID"], tags["CreationTimeStamp"],
+      tags["LastModifierUPN"], tags["LastModifierName"], tags["LastModifierObjectID"], tags["LastModifiedTimeStamp"],
+    ]
+  }
 }
 
 # Standard Load Balancer
@@ -63,6 +73,16 @@ resource "azurerm_lb" "main" {
   }
 
   tags = local.common_tags
+
+  lifecycle {
+    ignore_changes = [
+      # OIT governance owns these tags: a CostCenter policy (modify) and Event
+      # Grid auto-tagging on every create/update. Ours still apply on create.
+      tags["CostCenter"],
+      tags["CreatorUPN"], tags["CreatorName"], tags["CreatorObjectID"], tags["CreationTimeStamp"],
+      tags["LastModifierUPN"], tags["LastModifierName"], tags["LastModifierObjectID"], tags["LastModifiedTimeStamp"],
+    ]
+  }
 }
 
 # Backend Address Pool for VMSS

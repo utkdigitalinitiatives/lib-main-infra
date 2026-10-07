@@ -11,13 +11,17 @@
 #
 # Where the build VM leaks depends on how the project configures Packer, and the
 # two shapes need different sweeps:
-#   * no build_resource_group_name (lib-main-infra) -> Packer makes a throwaway
-#     pkr-* resource group, and a dead build leaks the whole group.
-#     -> sweep-build-groups
-#   * build_resource_group_name set (mccarthy-infra) -> Packer builds inside an
-#     existing RG, and a dead build leaks loose pkrvm/pkrni/pkros resources with
-#     no group to find.
+#   * build_resource_group_name set (lib-main-infra and mccarthy-infra, both in
+#     lib-main-images-rg) -> Packer builds inside an existing RG, and a dead build
+#     leaks loose pkrvm/pkrni/pkros resources with no group to find.
 #     -> sweep-build-resources
+#   * no build_resource_group_name -> Packer makes a throwaway pkr-* resource
+#     group, and a dead build leaks the whole group.
+#     -> sweep-build-groups
+#     No CI job uses this shape any more: creating a group needs subscription-
+#     scope rights, and neither service principal has them. Kept for a local
+#     build run by someone who does. Under a resource-group-scoped identity it
+#     sees no groups and reports "No leftover" whether or not any exist.
 #
 # Every sweep deletes only what is older than max_age_hours (default 24). A
 # GitHub job is capped at 6 hours, so nothing belonging to a running build can
@@ -124,12 +128,10 @@ sweep_scratch_images() {
   done <<< "$images"
 }
 
-# The other leak shape. lib-main lets Packer create a throwaway pkr-* resource
-# group, so a dead build leaks the whole group and sweep_build_groups finds it.
-# mccarthy-infra instead passes build_resource_group_name, so Packer builds
-# *inside* an existing RG - a dead build there leaks loose pkrvm/pkrni/pkros
-# resources into a shared RG and leaves NO group to find. Same running-VM bill,
-# invisible to the group sweep.
+# The leak shape every CI build now has. Both repos pass build_resource_group_name,
+# so Packer builds *inside* lib-main-images-rg - a dead build there leaks loose
+# pkrvm/pkrni/pkros resources into a shared RG and leaves NO group to find. Same
+# running-VM bill as a leaked pkr-* group, invisible to the group sweep.
 #
 # Two independent conditions before anything is deleted: the name starts with
 # "pkr" AND the resource is tagged Builder=packer. Deletion is ordered - VMs

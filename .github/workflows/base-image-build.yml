@@ -19,13 +19,19 @@ on:
       - 'packer/ansible/playbook-base.yml'
       - 'packer/ansible/templates/**'
 
+# id-token: write lets jobs fetch a GitHub OIDC token to log in to Azure.
+permissions:
+  id-token: write
+  contents: read
+
 env:
   # Safety net: force any JS action still declaring node20 onto the node24 runtime
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  # Azure auth is GitHub OIDC via azure/login; Packer reuses that CLI session.
+  # The SP has no password credential.
 
 jobs:
   build-base-image:
@@ -46,13 +52,16 @@ jobs:
       - name: Azure CLI Login
         uses: azure/login@v3
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # A cancelled or crashed Packer run leaks its whole pkr-* resource group,
-      # build VM still running. Sweep before building so the next run cleans up
-      # after the last one that died.
-      - name: Sweep leaked Packer build groups
-        run: .github/scripts/packer-cleanup.sh sweep-build-groups 24
+      # Packer builds inside the gallery resource group (the SP cannot create
+      # resource groups), so a cancelled or crashed run leaks loose pkrvm/pkrni
+      # resources there, build VM still running. Sweep before building so the
+      # next run cleans up after the last one that died.
+      - name: Sweep leaked Packer build resources
+        run: .github/scripts/packer-cleanup.sh sweep-build-resources "${{ vars.GALLERY_RESOURCE_GROUP }}" 24
 
       - name: Generate version
         id: version
@@ -74,10 +83,8 @@ jobs:
           packer validate \
             -only='drupal-base-rocky9*' \
             -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
-            -var "client_id=$ARM_CLIENT_ID" \
-            -var "client_secret=$ARM_CLIENT_SECRET" \
-            -var "tenant_id=$ARM_TENANT_ID" \
-            -var "use_azure_cli_auth=false" \
+            -var "use_azure_cli_auth=true" \
+            -var "build_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
             -var "image_version=${{ steps.version.outputs.version }}" \
             -var "gallery_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
             -var "gallery_name=${{ vars.GALLERY_NAME }}" \
@@ -91,10 +98,8 @@ jobs:
           packer build \
             -only='drupal-base-rocky9*' \
             -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
-            -var "client_id=$ARM_CLIENT_ID" \
-            -var "client_secret=$ARM_CLIENT_SECRET" \
-            -var "tenant_id=$ARM_TENANT_ID" \
-            -var "use_azure_cli_auth=false" \
+            -var "use_azure_cli_auth=true" \
+            -var "build_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
             -var "image_version=${{ steps.version.outputs.version }}" \
             -var "gallery_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
             -var "gallery_name=${{ vars.GALLERY_NAME }}" \
@@ -141,7 +146,9 @@ jobs:
         if: failure()
         uses: azure/login@v3
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Fetch Postmark token from Key Vault
         if: failure()

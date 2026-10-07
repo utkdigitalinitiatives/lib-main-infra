@@ -42,13 +42,23 @@ on:
         default: false
         type: boolean
 
+# id-token: write lets jobs fetch a GitHub OIDC token to log in to Azure.
+permissions:
+  id-token: write
+  contents: read
+
 env:
   # Safety net: force any JS action still declaring node20 onto the node24 runtime
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  # Azure auth is GitHub OIDC: azure/login and Terraform both exchange the
+  # job's id-token for an Entra token. The SP has no password credential.
+  ARM_USE_OIDC: true
+  # Terraform state (backend + terraform_remote_state) is read with Entra auth,
+  # not storage account keys. Needs Storage Blob Data Contributor on the account.
+  ARM_USE_AZUREAD: true
   TF_VAR_admin_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
   # DB admin password is now sourced from Azure Key Vault via data source
   TF_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
@@ -62,6 +72,12 @@ jobs:
   deploy-vm:
     name: ${{ inputs.destroy_only && 'Destroy' || 'Deploy' }} ${{ inputs.environment }} VM
     runs-on: ubuntu-latest
+    # Not decoration. This workflow exists to test cloud-init changes, so it is
+    # usually run from a feature branch, and the OIDC subject for a branch run
+    # is ref:refs/heads/<branch> - which has no federated credential and fails
+    # azure/login with AADSTS700213. Declaring the environment makes the subject
+    # environment:dev on any branch.
+    environment: dev
 
     steps:
       - name: Checkout code
@@ -75,7 +91,9 @@ jobs:
       - name: Azure CLI Login
         uses: azure/login@v3
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Start PostgreSQL if stopped
         if: inputs.sync_database && !inputs.destroy_only

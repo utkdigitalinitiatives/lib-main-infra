@@ -12,6 +12,11 @@ on:
   repository_dispatch:
     types: [drupal-dev-merge]
 
+# id-token: write lets jobs fetch a GitHub OIDC token to log in to Azure.
+permissions:
+  id-token: write
+  contents: read
+
 concurrency:
   group: dev-merge
   cancel-in-progress: true
@@ -22,7 +27,12 @@ env:
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  # Azure auth is GitHub OIDC: azure/login and Terraform both exchange the
+  # job's id-token for an Entra token. The SP has no password credential.
+  ARM_USE_OIDC: true
+  # Terraform state (backend + terraform_remote_state) is read with Entra auth,
+  # not storage account keys. Needs Storage Blob Data Contributor on the account.
+  ARM_USE_AZUREAD: true
   TF_VAR_admin_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
   # DB admin password is now sourced from Azure Key Vault via data source
   TF_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
@@ -70,13 +80,16 @@ jobs:
       - name: Azure CLI Login
         uses: azure/login@v3
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # A cancelled or crashed Packer run leaks its whole pkr-* resource group,
-      # build VM still running. This workflow runs with cancel-in-progress, so
-      # cancelled builds are routine - sweep before building.
-      - name: Sweep leaked Packer build groups
-        run: .github/scripts/packer-cleanup.sh sweep-build-groups 24
+      # Packer builds inside the gallery resource group (the SP cannot create
+      # resource groups), so a cancelled or crashed run leaks loose pkrvm/pkrni
+      # resources there, build VM still running. This workflow runs with
+      # cancel-in-progress, so cancelled builds are routine - sweep before building.
+      - name: Sweep leaked Packer build resources
+        run: .github/scripts/packer-cleanup.sh sweep-build-resources "${{ vars.GALLERY_RESOURCE_GROUP }}" 24
 
       - name: Get base image version
         id: base_version
@@ -104,10 +117,8 @@ jobs:
             -force \
             -only='drupal-rocky9*' \
             -var "subscription_id=$ARM_SUBSCRIPTION_ID" \
-            -var "client_id=$ARM_CLIENT_ID" \
-            -var "client_secret=$ARM_CLIENT_SECRET" \
-            -var "tenant_id=$ARM_TENANT_ID" \
-            -var "use_azure_cli_auth=false" \
+            -var "use_azure_cli_auth=true" \
+            -var "build_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
             -var "image_version=${{ steps.version.outputs.version }}" \
             -var "base_image_version=${{ steps.base_version.outputs.version }}" \
             -var "gallery_resource_group_name=${{ vars.GALLERY_RESOURCE_GROUP }}" \
@@ -152,7 +163,9 @@ jobs:
       - name: Azure CLI Login
         uses: azure/login@v3
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Start PostgreSQL if stopped
         run: |
@@ -265,7 +278,9 @@ jobs:
       - name: Azure CLI Login
         uses: azure/login@v3
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Generate SAS tokens
         id: sas
@@ -328,7 +343,9 @@ jobs:
       - name: Azure CLI Login
         uses: azure/login@v3
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Terraform Init
         working-directory: environments/dev

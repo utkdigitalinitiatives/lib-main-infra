@@ -1,6 +1,6 @@
 output "resource_group_name" {
   description = "Name of the devtest resource group"
-  value       = azurerm_resource_group.devtest.name
+  value       = data.azurerm_resource_group.devtest.name
 }
 
 output "postgresql_fqdn" {

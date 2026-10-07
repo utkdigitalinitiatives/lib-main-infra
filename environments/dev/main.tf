@@ -127,19 +127,25 @@ data "azurerm_storage_account_sas" "media_read" {
   }
 }
 
-# Resource group for dev resources (shared or per-PR)
-resource "azurerm_resource_group" "dev" {
-  name     = var.pr_number != null ? "lib-main-dev-pr-${var.pr_number}-rg" : "lib-main-dev-rg"
-  location = var.location
-
-  tags = {
-    Environment = "dev"
-    PRNumber    = var.pr_number != null ? var.pr_number : "none"
-    ManagedBy   = "terraform"
-    Project     = "lib-main"
-    Ephemeral   = var.pr_number != null ? "true" : "false"
-    CostCenter  = "E016010"
-  }
+# Resource group for dev resources.
+#
+# READ, not created. bootstrap/azure-setup.sh creates and owns every lib-main
+# resource group, because the GitHub Actions service principal holds Contributor
+# on those named groups only - not on the subscription - so it cannot create a
+# group, and must never delete one: deleting a group also deletes the SP's role
+# assignment scoped to it, which the SP cannot regrant itself.
+#
+# This matters most here. cleanup-dev in deploy-on-main-merge.yml runs an
+# UNTARGETED `terraform destroy` on this stack after every promotion to main.
+# While Terraform owned the group, that destroy deleted it - harmless while the
+# SP had subscription-wide Contributor, fatal without it: the next dev deploy
+# could neither find nor recreate the group. Destroy still tears down everything
+# inside the group, which is where the cost is; only the empty shell survives.
+#
+# The per-PR name (lib-main-dev-pr-N-rg) is gone with it. No workflow sets
+# TF_VAR_pr_number, and bootstrap does not create per-PR groups.
+data "azurerm_resource_group" "dev" {
+  name = "lib-main-dev-rg"
 }
 
 # Dev VM (validation stage)
@@ -148,7 +154,7 @@ module "dev_vm" {
 
   environment          = "dev"
   pr_number            = var.pr_number
-  resource_group_name  = azurerm_resource_group.dev.name
+  resource_group_name  = data.azurerm_resource_group.dev.name
   location             = var.location
   subnet_id            = var.subnet_id
   source_image_id      = data.azurerm_shared_image_version.drupal.id
@@ -159,13 +165,13 @@ module "dev_vm" {
 
   # Pass database connection info via cloud-init (uses permanent devtest PostgreSQL)
   custom_data = templatefile("${path.module}/cloud-init.tftpl", {
-    db_host         = var.devtest_db_host
-    db_name         = var.db_name
-    db_user         = var.db_admin_username
-    kv_name         = data.terraform_remote_state.secrets.outputs.key_vault_name
-    env_name        = "devtest"
-    hash_salt_secret_name = azurerm_key_vault_secret.drupal_hash_salt.name
-    storage_account   = var.devtest_storage_account
+    db_host                 = var.devtest_db_host
+    db_name                 = var.db_name
+    db_user                 = var.db_admin_username
+    kv_name                 = data.terraform_remote_state.secrets.outputs.key_vault_name
+    env_name                = "devtest"
+    hash_salt_secret_name   = azurerm_key_vault_secret.drupal_hash_salt.name
+    storage_account         = var.devtest_storage_account
     storage_key_secret_name = data.azurerm_key_vault_secret.devtest_storage_key.name
     # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
     # The escaped \% becomes a literal % in the substitution; combined with [NE] flag

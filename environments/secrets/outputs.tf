@@ -15,5 +15,5 @@ output "key_vault_uri" {
 
 output "resource_group_name" {
   description = "Resource group containing the shared Key Vault"
-  value       = azurerm_resource_group.secrets.name
+  value       = data.azurerm_resource_group.secrets.name
 }
