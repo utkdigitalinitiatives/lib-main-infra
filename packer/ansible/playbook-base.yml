@@ -16,6 +16,38 @@
 
   tasks:
     # ==========================================================================
+    # Wait for OIT's Defender and Azure Monitor agent installs
+    # ==========================================================================
+    # OIT's Azure Policy installs MDE.Linux (package mdatp) and
+    # AzureMonitorLinuxAgent (package azuremonitoragent) on every new VM, the
+    # Packer build VM too, about 10.5 minutes after it is created. The installs
+    # hold the rpm and SELinux locks, so any task that runs in that window can
+    # fail. Wait until both packages are installed and no package manager is
+    # running, then do the real work. The agents are removed again at the end of
+    # this playbook, before capture.
+    #
+    # Gives up after about 30 minutes and continues, so a build still works if
+    # the agents never arrive (for example, OIT exempts the gallery RG). If OIT
+    # does exempt it, delete this task: it then only adds 30 minutes per build.
+    - name: Wait for the Defender and Azure Monitor agent installs to finish
+      ansible.builtin.shell: |
+        rpm -q mdatp azuremonitoragent >/dev/null || exit 1
+        pgrep -x 'rpm|dnf|yum|semodule' >/dev/null && exit 1
+        sleep 60
+        ! pgrep -x 'rpm|dnf|yum|semodule' >/dev/null
+      register: _agents_wait
+      until: _agents_wait.rc == 0
+      retries: 60
+      delay: 30
+      changed_when: false
+      failed_when: false
+
+    - name: Report that the agents never arrived
+      ansible.builtin.debug:
+        msg: "Defender / Azure Monitor agents not installed after about 30 minutes. Continuing without them."
+      when: _agents_wait.rc != 0
+
+    # ==========================================================================
     # System updates and repositories (the big time-saver: ~5 min)
     # ==========================================================================
     - name: Update all packages
@@ -327,6 +359,51 @@
           }
         dest: /etc/image-manifest.json
         mode: "0644"
+
+    # ==========================================================================
+    # Remove OIT's Defender and Azure Monitor agents before capture
+    # ==========================================================================
+    # `waagent -deprovision` does not remove these packages or their state. If
+    # they are captured, every VM made from this image starts an already
+    # onboarded Defender, and Microsoft warns the clones can report as one
+    # device. Packer checks again just before capture and fails the build if
+    # any of this is still present.
+    - name: Remove the Defender and Azure Monitor agent packages
+      ansible.builtin.dnf:
+        name:
+          - mdatp
+          - azuremonitoragent
+        state: absent
+
+    - name: Remove the Defender and Azure Monitor agent state
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/opt/microsoft/mdatp
+        - /var/opt/microsoft/mdatp
+        - /opt/microsoft/mdatp
+        - /var/log/microsoft/mdatp
+        - /etc/opt/microsoft/azuremonitoragent
+        - /var/opt/microsoft/azuremonitoragent
+        - /opt/microsoft/azuremonitoragent
+
+    # The Defender installer adds the packages.microsoft.com repo to fetch mdatp.
+    # Nothing in this image uses it.
+    - name: Find the Microsoft package repo the Defender installer added
+      ansible.builtin.find:
+        paths: /etc/yum.repos.d
+        patterns: "*.repo"
+        contains: '.*packages\.microsoft\.com'
+      register: _ms_repos
+
+    - name: Remove the Microsoft package repo
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ _ms_repos.files }}"
+      loop_control:
+        label: "{{ item.path }}"
 
   handlers:
     - name: restart php-fpm

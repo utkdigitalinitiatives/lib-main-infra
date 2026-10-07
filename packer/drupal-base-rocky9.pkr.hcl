@@ -80,8 +80,8 @@ build {
     # Defender for Cloud installs MDE.Linux and AzureMonitorLinuxAgent on every new
     # VM about 11 minutes after it is created, and the installs hold the rpm and
     # SELinux locks. Any task that runs in that window can fail (2026-10-07: an
-    # SELinux task once, an EPEL key import once). The playbook is safe to run
-    # twice and Defender is done by the second run, so retry the whole run once.
+    # SELinux task once, an EPEL key import once). The playbook now waits for those
+    # installs before it starts; this retry stays as a fallback for a late install.
     max_retries = 2
 
     extra_arguments = [
@@ -129,6 +129,11 @@ build {
       # Clear bash history
       "rm -f /root/.bash_history",
       "rm -f /home/*/.bash_history 2>/dev/null || true",
+
+      # Refuse to capture OIT's Defender or Azure Monitor agent. The playbook
+      # removes them; this catches a late re-install. This script runs under
+      # plain `sh` (no -e), so it must exit 1 itself.
+      "if rpm -q mdatp || rpm -q azuremonitoragent || [ -e /etc/opt/microsoft/mdatp ] || [ -e /var/opt/microsoft/mdatp ]; then echo 'ERROR: Defender or Azure Monitor agent is in the image; refusing to capture it'; exit 1; fi",
 
       # Deprovision Azure agent
       "/usr/sbin/waagent -force -deprovision+user && export HISTSIZE=0 && sync"
