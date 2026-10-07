@@ -6,7 +6,7 @@ one of them is kept forever, so the gallery grew to 103 versions of which 3 were
 actually booted. Each version costs roughly 8.7 GB of snapshot storage.
 
 The keep rule, per image definition:
-  * every version referenced by a live VM or VMSS anywhere in the subscription
+  * every version referenced by a live VM or VMSS this identity can see
   * the newest N versions, for rollback
   * anything not fully published yet (a build may be mid-publish right now)
 
@@ -14,7 +14,17 @@ Every image definition in the gallery is pruned, discovered at run time rather
 than listed here. lib_main_gallery is the only gallery in the subscription and
 sibling repos build into it too - mccarthy-infra publishes mccarthy-rocky-linux-9
 here - so a hard-coded list would silently let every project except lib-main grow
-forever. A new site gets covered the day it first publishes, with no edit here.
+forever. A new site's images are found the day it first publishes, with no edit
+here - but see the next paragraph before they are pruned.
+
+"Can see" is the catch. The CI service principal holds roles on named resource
+groups, not on the subscription, and `az vm list` / `az vmss list` silently omit
+what it cannot read - they do not error. So a sibling site's production VMSS is
+invisible unless bootstrap/azure-setup.sh grants Reader on that site's resource
+groups (CONSUMER_RESOURCE_GROUPS there). Without that, its running version would
+look unused and fall to the keep-newest rule. The per-definition guard in main()
+refuses to prune any definition with no visible consumer at all, so a missing
+grant leaves that site's images unpruned rather than deleting one it runs.
 
 Dry run by default. Pass --apply to actually delete.
 """
@@ -38,6 +48,11 @@ KEEP_NEWEST_OVERRIDES = {
     # this tight; raise it if a wider rollback window is worth the spend.
     "drupal-base-rocky-linux-9": 3,
 }
+
+# Definitions that only feed other builds and never boot a VM, so "nothing live
+# runs it" is their normal state rather than a sign we cannot see the consumer.
+# The base image is the source image for every app build, not for any VM.
+BUILD_ONLY = {"drupal-base-rocky-linux-9"}
 
 # Escape hatch: definitions listed here are never touched at all. Empty on
 # purpose - use it only to park a definition during an incident, not as the
@@ -162,6 +177,18 @@ def main():
     submitted = {}
 
     for definition in prunable_definitions():
+        # An app image with no visible consumer at all most likely runs somewhere
+        # this identity cannot read (see the module docstring). Pruning it blind
+        # could delete the version a sibling site's production is running.
+        marker = f"/galleries/{GALLERY.lower()}/images/{definition.lower()}/versions/"
+        if definition not in BUILD_ONLY and not any(marker in i for i in in_use):
+            print(f"\n::warning::Skipping {definition}: no VM or VMSS this identity can "
+                  f"see runs any version of it. Either nothing runs it, or it runs in a "
+                  f"resource group this identity cannot read. Grant Reader there "
+                  f"(CONSUMER_RESOURCE_GROUPS in bootstrap/azure-setup.sh), or add it to "
+                  f"BUILD_ONLY if nothing ever boots it.")
+            continue
+
         keep, delete, in_flight = plan_for(
             definition, keep_newest_for(definition), in_use)
         print(f"\n=== {definition}: keeping {len(keep)}, deleting {len(delete)}"

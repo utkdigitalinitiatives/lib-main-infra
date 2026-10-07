@@ -46,10 +46,15 @@ locals {
   }
 }
 
-resource "azurerm_resource_group" "devtest" {
-  name     = "lib-main-devtest-rg"
-  location = var.location
-  tags     = local.common_tags
+# Resource group for the persistent devtest backing services.
+#
+# READ, not created. bootstrap/azure-setup.sh creates and owns every lib-main
+# resource group, because the GitHub Actions service principal holds Contributor
+# on those named groups only - not on the subscription - so it cannot create a
+# group, and must never delete one: deleting a group also deletes the SP's role
+# assignment scoped to it, which the SP cannot regrant itself.
+data "azurerm_resource_group" "devtest" {
+  name = "lib-main-devtest-rg"
 }
 
 # Shared Key Vault provisioned by environments/secrets/.
@@ -82,7 +87,7 @@ module "postgresql" {
   source = "../../modules/postgresql"
 
   environment            = local.environment
-  resource_group_name    = azurerm_resource_group.devtest.name
+  resource_group_name    = data.azurerm_resource_group.devtest.name
   location               = var.location
   sku_name               = "B_Standard_B1ms"
   administrator_login    = var.db_admin_username
@@ -100,7 +105,7 @@ module "blob_storage" {
   source = "../../modules/blob-storage"
 
   environment                = local.environment
-  resource_group_name        = azurerm_resource_group.devtest.name
+  resource_group_name        = data.azurerm_resource_group.devtest.name
   location                   = var.location
   container_name             = "drupal-media"
   replication_type           = "LRS"
@@ -125,7 +130,7 @@ module "automation" {
   source = "../../modules/azure-automation"
 
   environment         = local.environment
-  resource_group_name = azurerm_resource_group.devtest.name
+  resource_group_name = data.azurerm_resource_group.devtest.name
   location            = var.location
 
   tags = local.common_tags

@@ -1,7 +1,7 @@
 # Resource Group
 output "resource_group_name" {
   description = "Name of the production resource group"
-  value       = azurerm_resource_group.production.name
+  value       = data.azurerm_resource_group.production.name
 }
 
 # Networking

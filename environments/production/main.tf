@@ -71,11 +71,15 @@ resource "random_password" "drupal_admin" {
   override_special = "!@#%^&*-_=+?"
 }
 
-# Resource group for all production resources
-resource "azurerm_resource_group" "production" {
-  name     = "lib-main-production-rg"
-  location = var.location
-  tags     = local.common_tags
+# Resource group for all production resources.
+#
+# READ, not created. bootstrap/azure-setup.sh creates and owns every lib-main
+# resource group, because the GitHub Actions service principal holds Contributor
+# on those named groups only - not on the subscription - so it cannot create a
+# group, and must never delete one: deleting a group also deletes the SP's role
+# assignment scoped to it, which the SP cannot regrant itself.
+data "azurerm_resource_group" "production" {
+  name = "lib-main-production-rg"
 }
 
 # Shared Key Vault provisioned by environments/secrets/.
@@ -143,7 +147,7 @@ module "networking" {
   source = "../../modules/networking"
 
   environment                             = local.environment
-  resource_group_name                     = azurerm_resource_group.production.name
+  resource_group_name                     = data.azurerm_resource_group.production.name
   location                                = var.location
   vnet_address_space                      = var.vnet_address_space
   web_subnet_address_prefix               = var.web_subnet_prefix
@@ -160,7 +164,7 @@ module "load_balancer" {
   source = "../../modules/load-balancer"
 
   environment          = local.environment
-  resource_group_name  = azurerm_resource_group.production.name
+  resource_group_name  = data.azurerm_resource_group.production.name
   location             = var.location
   dns_label            = var.public_ip_id == null ? var.lb_dns_label : null
   public_ip_id         = var.public_ip_id
@@ -176,7 +180,7 @@ module "postgresql" {
   source = "../../modules/postgresql"
 
   environment                  = local.environment
-  resource_group_name          = azurerm_resource_group.production.name
+  resource_group_name          = data.azurerm_resource_group.production.name
   location                     = var.location
   sku_name                     = var.postgresql_sku
   storage_mb                   = var.postgresql_storage_mb
@@ -199,7 +203,7 @@ module "blob_storage" {
   source = "../../modules/blob-storage"
 
   environment                = local.environment
-  resource_group_name        = azurerm_resource_group.production.name
+  resource_group_name        = data.azurerm_resource_group.production.name
   location                   = var.location
   container_name             = "drupal-media"
   replication_type           = "LRS"
@@ -274,7 +278,7 @@ resource "random_string" "private_files_suffix" {
 
 resource "azurerm_storage_account" "private_files" {
   name                = "drupalprivate${random_string.private_files_suffix.result}"
-  resource_group_name = azurerm_resource_group.production.name
+  resource_group_name = data.azurerm_resource_group.production.name
   location            = var.location
 
   account_tier             = "Standard"
@@ -294,6 +298,16 @@ resource "azurerm_storage_account" "private_files" {
   }
 
   tags = local.common_tags
+
+  lifecycle {
+    ignore_changes = [
+      # OIT governance owns these tags: a CostCenter policy (modify) and Event
+      # Grid auto-tagging on every create/update. Ours still apply on create.
+      tags["CostCenter"],
+      tags["CreatorUPN"], tags["CreatorName"], tags["CreatorObjectID"], tags["CreationTimeStamp"],
+      tags["LastModifierUPN"], tags["LastModifierName"], tags["LastModifierObjectID"], tags["LastModifiedTimeStamp"],
+    ]
+  }
 }
 
 resource "azurerm_storage_share" "drupal_private" {
@@ -343,7 +357,7 @@ module "vmss" {
   source = "../../modules/drupal-vmss"
 
   environment         = local.environment
-  resource_group_name = azurerm_resource_group.production.name
+  resource_group_name = data.azurerm_resource_group.production.name
   location            = var.location
   subnet_id           = module.networking.web_subnet_id
 

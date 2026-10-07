@@ -57,19 +57,17 @@ This infrastructure repo works with the [lib-main](https://github.com/utkdigital
 - Azure CLI installed and logged in
 - Terraform >= 1.0
 - Packer (for local builds)
-- Access to UTK-Library-Systems Azure subscription
+- Access to the library's Azure subscription. Scripts and CI address it by GUID, never by display name, so OIT's rename of it changes nothing here.
 
 ### Initial Setup
 
 The current production environment was bootstrapped once in early 2026 and is not torn down. The steps below are for setting up a *new* deployment from scratch.
 
-`bootstrap/azure-setup.sh` is preserved as a historical reference for the original deploy but has drifted from current architecture (Key Vault, marketplace terms, deprecated CLI flags). **Audit it against this README and the header in the script before running.** Plan on hand-running the equivalent steps rather than executing it blindly.
-
-1. **Foundational Azure resources** — resource groups (`lib-main-images-rg`, `lib-main-tfstate-rg`), the Compute Gallery (`lib_main_gallery`) with `drupal-base-rocky-linux-9` and `drupal-rocky-linux-9` image definitions, the Terraform state storage account + `tfstate` container, and the `lib-main-github-actions` service principal. See `bootstrap/azure-setup.sh` for the original commands.
+1. **Run `bootstrap/azure-setup.sh`** — idempotent; safe to re-run, and re-running it is also how to repair the CI service principal. Creates all six resource groups, the Compute Gallery (`lib_main_gallery`) with `drupal-base-rocky-linux-9` and `drupal-rocky-linux-9` image definitions, the Terraform state storage account + `tfstate` container, and the `lib-main-github-actions` service principal with its federated credentials and scoped role assignments. See [Authentication and permissions](#authentication-and-permissions).
 
 2. **Accept Rocky Linux marketplace terms** — apply `bootstrap/marketplace-agreement/`. Required before Packer can build the base image.
 
-3. **Apply `environments/secrets/`** — provisions `lib-main-secrets-rg` and the shared Key Vault. Needs the GitHub Actions SP's *object ID* (`az ad sp show --id <appId> --query id -o tsv`) for the role assignment.
+3. **Apply `environments/secrets/`** — provisions the shared Key Vault in `lib-main-secrets-rg`. Needs the GitHub Actions SP's *object ID* (`az ad sp show --id <appId> --query id -o tsv`) for the role assignment.
 
 4. **Seed manual Key Vault secrets** — `production-db-admin-password`, `devtest-db-admin-password`, `shared-postmark-api-token`. The TF-managed secrets (Drupal admin password, hash salts, storage keys) populate themselves on subsequent applies.
 
@@ -79,8 +77,9 @@ The current production environment was bootstrapped once in early 2026 and is no
    - `AZURE_SUBSCRIPTION_ID`
    - `AZURE_TENANT_ID`
    - `AZURE_CLIENT_ID`
-   - `AZURE_CLIENT_SECRET`
    - `SSH_PUBLIC_KEY`
+
+   There is no `AZURE_CLIENT_SECRET`: workflows log in with GitHub OIDC.
 
    Application secrets (DB passwords, hash salts, storage keys, Postmark token) live in the Key Vault — see [Key Vault](#key-vault) — not in GitHub secrets. Workflows fetch them via `az keyvault secret show` after `azure/login`.
 
@@ -133,9 +132,56 @@ get-image-version → deploy-production → cleanup-dev
 
 1. **Get Image Version** — Queries gallery for latest image
 2. **Deploy to Production** — Rolling update to the production VMSS. MaxSurge is enabled, so the upgrade brings up a replacement instance and waits for it to report healthy before deleting the old one (steady state stays at one instance)
-3. **Cleanup Dev** — Destroys the shared dev VM and resources
+3. **Cleanup Dev** — Destroys the shared dev VM and its resources. The empty `lib-main-dev-rg` stays; bootstrap owns it
+
+## Authentication and permissions
+
+Workflows authenticate to Azure with **GitHub OIDC federated credentials** on the
+`lib-main-github-actions` service principal. It has no password credential.
+Terraform reads state with Entra auth (`ARM_USE_AZUREAD`), not storage account keys.
+
+Federated credential subjects (Entra matches them exactly — no wildcards):
+
+| Subject | Covers |
+|---|---|
+| `repo:utkdigitalinitiatives/lib-main-infra:ref:refs/heads/main` | `repository_dispatch`, `schedule` and `push` events, which run on the default branch, and manual runs started from `main` |
+| `repo:utkdigitalinitiatives/lib-main-infra:environment:dev` | jobs declaring `environment: dev` — `deploy-dev` and `test-cloud-init.yml`, from any branch |
+| `repo:utkdigitalinitiatives/lib-main-infra:environment:production` | `deploy-production.yml`, from any branch |
+
+Any other workflow started manually from a non-`main` branch fails `azure/login`
+with `AADSTS700213`. Run it from `main`.
+
+The service principal holds **no subscription-scope role**. Every grant is scoped
+to a resource group or a single resource, all made by `bootstrap/azure-setup.sh`
+except the Key Vault one:
+
+| Role | Scope | Why |
+|---|---|---|
+| Contributor | each of the six `lib-main-*-rg` groups | Terraform, Packer, and the workflows' `az` calls |
+| Role Based Access Control Administrator | `lib-main-secrets-rg` | production/dev grant their VM identities access to the vault |
+| Storage Blob Data Contributor | the Terraform state storage account | Entra-auth state access |
+| Network Contributor | the load balancer's external public IP | any LB update re-checks join rights on it |
+| Reader | sibling sites' production/dev groups | lets `gallery-prune.py` see which gallery versions they run |
+| Key Vault Secrets Officer | the shared vault | managed by `environments/secrets/` |
+
+Two consequences of that scoping:
+
+- **Terraform reads resource groups, never creates or deletes them.** Contributor
+  on a named group cannot create a group, and deleting one would delete the SP's
+  role assignment on it. Bootstrap owns all six.
+- **Packer builds inside `lib-main-images-rg`** (`build_resource_group_name`)
+  instead of a throwaway `pkr-*` group, which would need subscription rights. A
+  dead build therefore leaks loose `pkrvm*`/`pkrni*` resources there;
+  `packer-cleanup.sh sweep-build-resources` removes them before every build and
+  in the monthly prune.
+
+Terraform ignores the tags the subscription's governance tooling writes
+(`CostCenter`, `Creator*`, `LastModif*`) after a resource exists, so plans do not
+fight it. Tags set in Terraform still apply on create.
 
 ## Azure Resources
+
+All six groups are created by `bootstrap/azure-setup.sh` and only read by Terraform.
 
 | Resource Group | Purpose |
 |----------------|---------|

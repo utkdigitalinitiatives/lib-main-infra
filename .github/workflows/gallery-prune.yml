@@ -24,7 +24,9 @@ env:
   # Safety net: force any JS action still declaring node20 onto the node24 runtime
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# id-token: write lets jobs fetch a GitHub OIDC token to log in to Azure.
 permissions:
+  id-token: write
   contents: read
 
 # Never let two prunes overlap - the second would plan against versions the
@@ -46,13 +48,9 @@ jobs:
       - name: Azure CLI Login
         uses: azure/login@v3
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-
-      # Also catches build groups leaked by a run that was cancelled between image
-      # builds, which the sweep inside the build workflows would otherwise only
-      # notice on the next build.
-      - name: Sweep leaked Packer build groups
-        run: .github/scripts/packer-cleanup.sh sweep-build-groups 24
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # Safety net across every project that builds into the shared gallery.
       # Each repo deletes its own scratch image after its own build, but a build
@@ -62,10 +60,11 @@ jobs:
       - name: Sweep stale scratch images
         run: .github/scripts/packer-cleanup.sh sweep-scratch-images lib-main-images-rg 24
 
-      # The other leak shape: projects that pass build_resource_group_name build
-      # inside an existing RG, so a dead build leaves loose pkrvm/pkrni/pkros
-      # resources and no pkr-* group for the sweep above to find. mccarthy-infra
-      # builds this way, and a leaked build VM bills the same either way.
+      # Every project now builds inside this RG via build_resource_group_name
+      # (neither SP can create resource groups), so a dead build leaves loose
+      # pkrvm/pkrni/pkros resources here, its build VM still billing. Also
+      # catches a run cancelled between builds, which the sweep inside the build
+      # workflows would otherwise only notice on the next build.
       - name: Sweep stray Packer build resources
         run: .github/scripts/packer-cleanup.sh sweep-build-resources lib-main-images-rg 24
 

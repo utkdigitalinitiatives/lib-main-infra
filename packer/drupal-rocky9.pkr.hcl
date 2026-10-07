@@ -11,16 +11,16 @@
 
 # Source: Azure ARM builder using base image from gallery
 source "azure-arm" "drupal" {
-  # Authentication
+  # Authentication: ambient Azure CLI session (OIDC in CI, `az login` locally)
   use_azure_cli_auth = var.use_azure_cli_auth
   subscription_id    = var.subscription_id
-  client_id          = var.client_id
-  client_secret      = var.client_secret
-  tenant_id          = var.tenant_id
 
-  # Build VM configuration
-  location = var.location
-  vm_size  = var.vm_size
+  # Build VM configuration.
+  # location and build_resource_group_name are mutually exclusive -- Packer takes
+  # the location from an existing build resource group and rejects both together.
+  location                  = var.build_resource_group_name == null ? var.location : null
+  build_resource_group_name = var.build_resource_group_name
+  vm_size                   = var.vm_size
 
   # Source image: Base image from Shared Image Gallery
   # This replaces the marketplace image for faster builds

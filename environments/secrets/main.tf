@@ -57,10 +57,15 @@ locals {
 
 data "azurerm_client_config" "current" {}
 
-resource "azurerm_resource_group" "secrets" {
-  name     = "lib-main-secrets-rg"
-  location = var.location
-  tags     = local.common_tags
+# Resource group for the shared Key Vault.
+#
+# READ, not created. bootstrap/azure-setup.sh creates and owns every lib-main
+# resource group, because the GitHub Actions service principal holds Contributor
+# on those named groups only - not on the subscription - so it cannot create a
+# group, and must never delete one: deleting a group also deletes the SP's role
+# assignment scoped to it, which the SP cannot regrant itself.
+data "azurerm_resource_group" "secrets" {
+  name = "lib-main-secrets-rg"
 }
 
 # Random suffix keeps the vault name globally unique without depending on a hand-picked value.
@@ -70,8 +75,8 @@ resource "random_id" "kv_suffix" {
 
 resource "azurerm_key_vault" "shared" {
   name                = "lib-main-kv-${random_id.kv_suffix.hex}"
-  location            = azurerm_resource_group.secrets.location
-  resource_group_name = azurerm_resource_group.secrets.name
+  location            = data.azurerm_resource_group.secrets.location
+  resource_group_name = data.azurerm_resource_group.secrets.name
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
 
@@ -89,6 +94,16 @@ resource "azurerm_key_vault" "shared" {
   }
 
   tags = local.common_tags
+
+  lifecycle {
+    ignore_changes = [
+      # OIT governance owns these tags: a CostCenter policy (modify) and Event
+      # Grid auto-tagging on every create/update. Ours still apply on create.
+      tags["CostCenter"],
+      tags["CreatorUPN"], tags["CreatorName"], tags["CreatorObjectID"], tags["CreationTimeStamp"],
+      tags["LastModifierUPN"], tags["LastModifierName"], tags["LastModifierObjectID"], tags["LastModifiedTimeStamp"],
+    ]
+  }
 }
 
 # GitHub Actions service principal: needs to set + read secrets during apply
