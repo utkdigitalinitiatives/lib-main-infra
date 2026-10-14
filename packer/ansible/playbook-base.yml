@@ -16,6 +16,43 @@
 
   tasks:
     # ==========================================================================
+    # Wait for OIT's Defender and Azure Monitor agent installs
+    # ==========================================================================
+    # OIT's Azure Policy installs MDE.Linux (package mdatp) and
+    # AzureMonitorLinuxAgent (package azuremonitoragent) on every new VM, the
+    # Packer build VM too, about 10.5 minutes after it is created. The installs
+    # hold the rpm and SELinux locks, so any task that runs in that window can
+    # fail. Wait until both packages are installed and no package manager is
+    # running, then do the real work.
+    #
+    # The agents stay in the image on purpose. Waiting for them makes every base
+    # image carry the same two agents instead of whichever one happened to finish
+    # before capture. Tested 2026-10-14: VMs and scale-set instances created from
+    # such an image each register with Defender under their own identity, and the
+    # MDE.Linux / AzureMonitorLinuxAgent extensions install cleanly on top.
+    #
+    # Gives up after about 30 minutes and continues, so a build still works if
+    # the agents never arrive (for example, OIT exempts the gallery RG). If OIT
+    # does exempt it, delete this task: it then only adds 30 minutes per build.
+    - name: Wait for the Defender and Azure Monitor agent installs to finish
+      ansible.builtin.shell: |
+        rpm -q mdatp azuremonitoragent >/dev/null || exit 1
+        pgrep -x 'rpm|dnf|yum|semodule' >/dev/null && exit 1
+        sleep 60
+        ! pgrep -x 'rpm|dnf|yum|semodule' >/dev/null
+      register: _agents_wait
+      until: _agents_wait.rc == 0
+      retries: 60
+      delay: 30
+      changed_when: false
+      failed_when: false
+
+    - name: Report that the agents never arrived
+      ansible.builtin.debug:
+        msg: "Defender / Azure Monitor agents not installed after about 30 minutes. Continuing without them."
+      when: _agents_wait.rc != 0
+
+    # ==========================================================================
     # System updates and repositories (the big time-saver: ~5 min)
     # ==========================================================================
     - name: Update all packages
