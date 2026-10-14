@@ -71,7 +71,9 @@ env:
 jobs:
   deploy-vm:
     name: ${{ inputs.destroy_only && 'Destroy' || 'Deploy' }} ${{ inputs.environment }} VM
-    runs-on: ubuntu-latest
+    # Pinned for the database sync until both PostgreSQL servers are on 18.
+    # See prepare-database in build-on-dispatch.yml.
+    runs-on: ubuntu-24.04
     # Not decoration. This workflow exists to test cloud-init changes, so it is
     # usually run from a feature branch, and the OIDC subject for a branch run
     # is ref:refs/heads/<branch> - which has no federated credential and fails
