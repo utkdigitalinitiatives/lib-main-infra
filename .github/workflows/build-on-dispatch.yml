@@ -154,7 +154,11 @@ jobs:
   prepare-database:
     name: Prepare Database
     needs: build-image
-    runs-on: ubuntu-latest
+    # Pinned until both PostgreSQL servers are on 18. ubuntu-26.04 installs
+    # client 18, whose pg_restore sends "SET transaction_timeout", which a 16
+    # server rejects. Unpin in the same change that upgrades the servers:
+    # pg_dump 16 refuses to dump an 18 server.
+    runs-on: ubuntu-24.04
     concurrency:
       group: devtest-database
       cancel-in-progress: false
