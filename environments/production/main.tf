@@ -53,7 +53,7 @@ locals {
     ManagedBy   = "terraform"
     Application = "drupal"
     Project     = "lib-main"
-    CostCenter  = "E016010"
+    CostCenter  = "10-1100001-102500-240-0000"
   }
 }
 
