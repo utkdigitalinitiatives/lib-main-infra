@@ -185,6 +185,6 @@ module "dev_vm" {
     Project      = "lib-main"
     Stage        = "dev-validation"
     ImageVersion = var.image_version
-    CostCenter   = "E016010"
+    CostCenter   = "10-1100001-102500-240-0000"
   }
 }
