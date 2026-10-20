@@ -79,6 +79,12 @@ resource "azurerm_automation_runbook" "stop_postgresql" {
 
   lifecycle {
     ignore_changes = [
+      # azurerm reads runbook_type back as "PowerShell" for a runbook created as
+      # "PowerShell72" (the newer Automation API reports it that way), so every
+      # plan wants to replace this. Azure has it right - older API versions
+      # report PowerShell72 - so this suppresses a provider misread, not real
+      # drift. Re-test on provider upgrades; drop it once the read is fixed.
+      runbook_type,
       # OIT governance owns these tags: a CostCenter policy (modify) and Event
       # Grid auto-tagging on every create/update. Ours still apply on create.
       tags["CostCenter"],
