@@ -67,7 +67,7 @@ variable "location" {
 # Left null, Packer creates a pkr-Resource-Group-* per build, which needs
 # resourceGroups/write at SUBSCRIPTION scope. The CI service principal holds
 # Contributor on named resource groups only, so CI always passes this
-# (vars.GALLERY_RESOURCE_GROUP).
+# (vars.GALLERY_RESOURCE_GROUP, where the intermediate managed image lands too).
 # Null still works for a local build by someone with subscription rights.
 #
 # A dead build now leaks loose pkrvm/pkrni/pkros resources into this group
