@@ -73,6 +73,14 @@ jobs:
             echo "version=$(date +%Y.%m.0)" >> $GITHUB_OUTPUT
           fi
 
+      # Packer only makes a managed image, so nothing else would notice a taken
+      # version name until the publish step. Check before the build, not after it.
+      - name: Check the gallery version is free
+        run: |
+          .github/scripts/gallery-publish.sh check-version-free \
+            "${{ vars.GALLERY_RESOURCE_GROUP }}" "${{ vars.GALLERY_NAME }}" \
+            drupal-base-rocky-linux-9 "${{ steps.version.outputs.version }}"
+
       - name: Packer Init
         working-directory: packer
         run: packer init .
@@ -106,6 +114,33 @@ jobs:
             -var "location=${{ vars.LOCATION }}" \
             -var "replication_regions=[\"${{ vars.LOCATION }}\"]" \
             .
+
+      # The ARM token from the first login lasts about an hour and az cannot renew
+      # it: the GitHub OIDC token it would present again expires 5 minutes after
+      # login (AADSTS700024). A base build alone can run past that hour.
+      - name: Azure CLI Login (refresh for publish)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publish to the gallery
+        run: |
+          .github/scripts/gallery-publish.sh publish \
+            "${{ vars.GALLERY_RESOURCE_GROUP }}" "${{ vars.GALLERY_NAME }}" \
+            drupal-base-rocky-linux-9 "${{ steps.version.outputs.version }}" \
+            "drupal-base-rocky9-${{ steps.version.outputs.version }}" "${{ vars.LOCATION }}"
+
+      # The managed image is only the publish source. Nothing ever boots it and
+      # nothing else prunes it, so delete it once the publish is done or has
+      # failed - the gallery version keeps its own copy.
+      - name: Delete intermediate managed image
+        if: always()
+        run: |
+          .github/scripts/packer-cleanup.sh delete-scratch-image \
+            "${{ vars.GALLERY_RESOURCE_GROUP }}" \
+            "drupal-base-rocky9-${{ steps.version.outputs.version }}"
 
       - name: Output image version
         run: |

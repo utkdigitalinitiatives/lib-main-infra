@@ -109,6 +109,14 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using base image version: $VERSION"
 
+      # Packer only makes a managed image, so nothing else would notice a taken
+      # version name until the publish step. Check before the build, not after it.
+      - name: Check the gallery version is free
+        run: |
+          .github/scripts/gallery-publish.sh check-version-free \
+            "${{ vars.GALLERY_RESOURCE_GROUP }}" "${{ vars.GALLERY_NAME }}" \
+            drupal-rocky-linux-9 "${{ steps.version.outputs.version }}"
+
       - name: Build image
         working-directory: packer
         run: |
@@ -129,6 +137,33 @@ jobs:
             -var "drupal_repo=${{ github.event.client_payload.drupal_repo }}" \
             -var "drupal_ref=${{ github.event.client_payload.drupal_ref }}" \
             .
+
+      # The ARM token from the first login lasts about an hour and az cannot renew
+      # it: the GitHub OIDC token it would present again expires 5 minutes after
+      # login (AADSTS700024). The build plus a ~8 minute publish can outlast it.
+      - name: Azure CLI Login (refresh for publish)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publish to the gallery
+        run: |
+          .github/scripts/gallery-publish.sh publish \
+            "${{ vars.GALLERY_RESOURCE_GROUP }}" "${{ vars.GALLERY_NAME }}" \
+            drupal-rocky-linux-9 "${{ steps.version.outputs.version }}" \
+            "drupal-rocky9-${{ steps.version.outputs.version }}" "${{ vars.LOCATION }}"
+
+      # The managed image is only the publish source. Nothing ever boots it and
+      # nothing else prunes it, so delete it once the publish is done or has
+      # failed - the gallery version keeps its own copy.
+      - name: Delete intermediate managed image
+        if: always()
+        run: |
+          .github/scripts/packer-cleanup.sh delete-scratch-image \
+            "${{ vars.GALLERY_RESOURCE_GROUP }}" \
+            "drupal-rocky9-${{ steps.version.outputs.version }}"
 
       - name: Build Summary
         run: |

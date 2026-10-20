@@ -40,21 +40,11 @@ source "azure-arm" "drupal" {
     plan_publisher = "resf"
   }
 
-  # Output to Shared Image Gallery
-  shared_image_gallery_destination {
-    subscription         = var.subscription_id
-    resource_group       = var.gallery_resource_group_name
-    gallery_name         = var.gallery_name
-    image_name           = var.image_name
-    image_version        = var.image_version
-    replication_regions  = var.replication_regions
-    storage_account_type = "Standard_LRS"
-  }
-
-  # No managed_image_* settings on purpose: Packer captures the build VM straight
-  # into the gallery. An intermediate managed image gets tagged by the
-  # subscription's auto-tagging seconds after it is created, and the gallery
-  # publish fails with Conflict while that update is still running.
+  # Output is a managed image only. The workflow publishes it to the gallery with
+  # .github/scripts/gallery-publish.sh, which waits and retries where Packer's own
+  # gallery publish cannot - see that script for why.
+  managed_image_resource_group_name = var.gallery_resource_group_name
+  managed_image_name                = "drupal-rocky9-${var.image_version}"
 
   # OS disk configuration
   os_type         = "Linux"
