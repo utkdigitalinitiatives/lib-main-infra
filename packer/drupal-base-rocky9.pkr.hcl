@@ -39,9 +39,10 @@ source "azure-arm" "drupal-base" {
     storage_account_type = "Standard_LRS"
   }
 
-  # Managed image configuration (intermediate)
-  managed_image_resource_group_name = var.gallery_resource_group_name
-  managed_image_name                = "drupal-base-rocky9-${var.image_version}"
+  # No managed_image_* settings on purpose: Packer captures the build VM straight
+  # into the gallery. An intermediate managed image gets tagged by the
+  # subscription's auto-tagging seconds after it is created, and the gallery
+  # publish fails with Conflict while that update is still running.
 
   # OS disk configuration
   os_type         = "Linux"

@@ -130,16 +130,6 @@ jobs:
             -var "drupal_ref=${{ github.event.client_payload.drupal_ref }}" \
             .
 
-      # Packer always leaves an intermediate managed image behind on the way to the
-      # gallery version. Nothing ever boots it and nothing else prunes it, so
-      # delete it here - the published gallery version keeps its own copy.
-      - name: Delete intermediate managed image
-        if: always()
-        run: |
-          .github/scripts/packer-cleanup.sh delete-scratch-image \
-            "${{ vars.GALLERY_RESOURCE_GROUP }}" \
-            "drupal-rocky9-${{ steps.version.outputs.version }}"
-
       - name: Build Summary
         run: |
           echo "## Image Build Complete" >> $GITHUB_STEP_SUMMARY
