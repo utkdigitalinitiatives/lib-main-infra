@@ -23,9 +23,13 @@ if (-not $servers) {
     return
 }
 
+$failed = @()
+
 foreach ($server in $servers) {
     $name = $server.Name
-    $rg = $server.ResourceGroupName
+    # The server object has no ResourceGroupName property, so take it from the
+    # resource ID: /subscriptions/<sub>/resourceGroups/<rg>/providers/...
+    $rg = ($server.Id -split '/')[4]
     $state = $server.State
 
     if ($state -eq "Ready") {
@@ -36,9 +40,15 @@ foreach ($server in $servers) {
         }
         catch {
             Write-Error "Failed to stop '$name': $_"
+            $failed += $name
         }
     }
     else {
         Write-Output "Skipping server '$name' (state: $state)."
     }
+}
+
+# Write-Error alone leaves the job "Completed"; throw so a failed stop shows as "Failed"
+if ($failed) {
+    throw "Failed to stop: $($failed -join ', ')"
 }
