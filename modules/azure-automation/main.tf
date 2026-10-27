@@ -71,7 +71,12 @@ resource "azurerm_automation_runbook" "stop_postgresql" {
   automation_account_name = azurerm_automation_account.main.name
   log_verbose             = false
   log_progress            = false
-  runbook_type            = "PowerShell72"
+  # PowerShell 7.2 via a runtime environment, not the legacy "PowerShell72"
+  # type. azurerm reads a legacy runbook back as "PowerShell", so the legacy
+  # type either plans a replace every time or, if ignored, makes every update
+  # fail with "Runbook Type cannot be modified".
+  runbook_type             = "PowerShell"
+  runtime_environment_name = "PowerShell-7.2"
 
   content = file("${path.module}/scripts/Stop-TaggedPostgreSql.ps1")
 
@@ -79,12 +84,6 @@ resource "azurerm_automation_runbook" "stop_postgresql" {
 
   lifecycle {
     ignore_changes = [
-      # azurerm reads runbook_type back as "PowerShell" for a runbook created as
-      # "PowerShell72" (the newer Automation API reports it that way), so every
-      # plan wants to replace this. Azure has it right - older API versions
-      # report PowerShell72 - so this suppresses a provider misread, not real
-      # drift. Re-test on provider upgrades; drop it once the read is fixed.
-      runbook_type,
       # OIT governance owns these tags: a CostCenter policy (modify) and Event
       # Grid auto-tagging on every create/update. Ours still apply on create.
       tags["CostCenter"],
@@ -114,5 +113,11 @@ resource "azurerm_automation_job_schedule" "stop_postgresql" {
   parameters = {
     tagkey   = var.target_tag_key
     tagvalue = var.target_tag_value
+  }
+
+  lifecycle {
+    # Deleting a runbook deletes its job schedules in Azure, but the runbook
+    # keeps its name, so nothing else would make Terraform recreate this link.
+    replace_triggered_by = [azurerm_automation_runbook.stop_postgresql.id]
   }
 }
