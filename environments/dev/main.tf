@@ -93,37 +93,22 @@ data "azurerm_shared_image_version" "drupal" {
   resource_group_name = var.gallery_resource_group_name
 }
 
-# SAS token for Apache reverse proxy to serve blob storage files (read-only, 2-year expiry)
-data "azurerm_storage_account_sas" "media_read" {
+# SAS token for Apache reverse proxy to serve blob storage files (read-only, 2-year expiry).
+# Scoped to the media container, not the whole account.
+data "azurerm_storage_account_blob_container_sas" "media_read" {
   connection_string = "DefaultEndpointsProtocol=https;AccountName=${var.devtest_storage_account};AccountKey=${data.azurerm_key_vault_secret.devtest_storage_key.value};EndpointSuffix=core.windows.net"
+  container_name    = "drupal-media"
   https_only        = true
   start             = "2026-01-01T00:00:00Z"
   expiry            = "2028-01-01T00:00:00Z"
 
-  resource_types {
-    service   = false
-    container = false
-    object    = true
-  }
-
-  services {
-    blob  = true
-    queue = false
-    table = false
-    file  = false
-  }
-
   permissions {
-    read    = true
-    write   = false
-    delete  = false
-    list    = false
-    add     = false
-    create  = false
-    update  = false
-    process = false
-    tag     = false
-    filter  = false
+    read   = true
+    add    = false
+    create = false
+    write  = false
+    delete = false
+    list   = false
   }
 }
 
@@ -176,7 +161,7 @@ module "dev_vm" {
     # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
     # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
     # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.
-    storage_sas_token = replace(data.azurerm_storage_account_sas.media_read.sas, "%", "\\%")
+    storage_sas_token = replace(data.azurerm_storage_account_blob_container_sas.media_read.sas, "%", "\\%")
   })
 
   tags = {

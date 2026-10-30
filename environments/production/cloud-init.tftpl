@@ -69,7 +69,9 @@ write_files:
       $config['az_blob_fs.settings']['az_blob_account_key_name'] = 'azure_blob_key';
       $config['az_blob_fs.settings']['az_blob_container_name'] = '${storage_container}';
       $config['az_blob_fs.settings']['az_blob_protocol'] = 'https';
+%{ if domain_name != null ~}
       $config['az_blob_fs.settings']['az_blob_cdn_host_name'] = '${domain_name}';
+%{ endif ~}
 
       // Default file scheme
       $settings['file_default_scheme'] = 'azblob';
@@ -98,6 +100,8 @@ write_files:
       HASH_SALT_SECRET="${hash_salt_secret_name}"
       STORAGE_KEY_SECRET="${storage_key_secret_name}"
       PRIVATE_STORAGE_KEY_SECRET="${private_files_key_secret_name}"
+      ADMIN_PASSWORD_SECRET="${drupal_admin_password_secret_name}"
+      ADMIN_PASSWORD_FILE="/etc/drupal/admin-password"
       ENV_PHP="/etc/drupal/environment.php"
       SECRETS_ENV="/etc/drupal/secrets.env"
       LOG_FILE="/var/log/drupal-init.log"
@@ -131,6 +135,7 @@ write_files:
       HASH_SALT=""
       STORAGE_KEY=""
       PRIVATE_STORAGE_KEY=""
+      ADMIN_PASSWORD=""
       for attempt in $(seq 1 18); do
         TOKEN=$(get_token || true)
         if [ -n "$TOKEN" ]; then
@@ -140,6 +145,9 @@ write_files:
           # Best-effort: the private-files mount is non-fatal by design, so this
           # secret is not part of the required set gating the loop below.
           PRIVATE_STORAGE_KEY=$(fetch_secret "$PRIVATE_STORAGE_KEY_SECRET" "$TOKEN" || true)
+          # Best-effort: /opt/drupal-init.sh needs it only to install into an
+          # empty database, and refuses to install without it.
+          ADMIN_PASSWORD=$(fetch_secret "$ADMIN_PASSWORD_SECRET" "$TOKEN" || true)
           [ -n "$DB_PASSWORD" ] && [ -n "$HASH_SALT" ] && [ -n "$STORAGE_KEY" ] && break
         fi
         log "Secret fetch attempt $attempt incomplete; retrying in 10s..."
@@ -152,27 +160,39 @@ write_files:
       fi
 
       # Substitute placeholders in environment.php. Use python rather than sed
-      # so '/' '&' '|' in values don't need escaping.
+      # so '/' '&' '|' in values don't need escaping. Each value lands inside a
+      # single-quoted PHP string, so \ and ' are escaped for PHP.
       DB_PASSWORD="$DB_PASSWORD" HASH_SALT="$HASH_SALT" STORAGE_KEY="$STORAGE_KEY" \
         python3 - "$ENV_PHP" <<'PYEOF'
       import os, sys
+      def php(value):
+          return value.replace('\\', '\\\\').replace("'", "\\'")
       path = sys.argv[1]
       with open(path) as f:
           content = f.read()
-      content = content.replace('__DB_PASSWORD__', os.environ['DB_PASSWORD'])
-      content = content.replace('__HASH_SALT__', os.environ['HASH_SALT'])
-      content = content.replace('__STORAGE_KEY__', os.environ['STORAGE_KEY'])
+      content = content.replace('__DB_PASSWORD__', php(os.environ['DB_PASSWORD']))
+      content = content.replace('__HASH_SALT__', php(os.environ['HASH_SALT']))
+      content = content.replace('__STORAGE_KEY__', php(os.environ['STORAGE_KEY']))
       with open(path, 'w') as f:
           f.write(content)
       PYEOF
 
+      # %q quotes each value so `source` reads it back verbatim, whatever
+      # characters it holds.
       umask 077
-      cat > "$SECRETS_ENV" <<EOF
-      DB_PASSWORD=$DB_PASSWORD
-      PRIVATE_STORAGE_KEY=$PRIVATE_STORAGE_KEY
-      EOF
+      {
+        printf 'DB_PASSWORD=%q\n' "$DB_PASSWORD"
+        printf 'PRIVATE_STORAGE_KEY=%q\n' "$PRIVATE_STORAGE_KEY"
+      } > "$SECRETS_ENV"
       chmod 640 "$SECRETS_ENV"
       chown root:drupal "$SECRETS_ENV"
+
+      # Drupal admin password, root-only. Read only by the install branch of
+      # /opt/drupal-init.sh, so it stays out of custom_data.
+      rm -f "$ADMIN_PASSWORD_FILE"
+      if [ -n "$ADMIN_PASSWORD" ]; then
+        printf '%s' "$ADMIN_PASSWORD" > "$ADMIN_PASSWORD_FILE"
+      fi
 
       # --- TEMPORARY: Pantheon migration source creds (OPTIONAL — must never block boot) ---
       # Only substitutes if the 'migrate-pantheon-db' secret exists in KV. A missing or
@@ -189,12 +209,14 @@ write_files:
         # by this optional migration wiring).
         if MIGRATE_JSON="$MIGRATE_JSON" python3 - "$ENV_PHP" 2>/dev/null <<'PYEOF'
       import os, sys, json
+      def php(value):
+          return value.replace('\\', '\\\\').replace("'", "\\'")
       path = sys.argv[1]
       creds = json.loads(os.environ['MIGRATE_JSON'])
       with open(path) as f:
           content = f.read()
       for token, field in [('NAME', 'database'), ('USER', 'username'), ('PASS', 'password'), ('HOST', 'host'), ('PORT', 'port')]:
-          content = content.replace('__MIGRATE_DB_' + token + '__', str(creds[field]))
+          content = content.replace('__MIGRATE_DB_' + token + '__', php(str(creds[field])))
       with open(path, 'w') as f:
           f.write(content)
       PYEOF
@@ -215,7 +237,9 @@ write_files:
     owner: root:root
     content: |
       #!/bin/bash
-      set -e
+      # pipefail: drush output goes through tee, which would otherwise hide a
+      # failed drush from set -e.
+      set -eo pipefail
 
       # Sourced from /opt/fetch-secrets.sh (Key Vault MI).
       # shellcheck disable=SC1091
@@ -240,11 +264,30 @@ write_files:
       SITE_UUID="${drupal_site_uuid}"
       CONFIG_SYNC_DIR="$DRUPAL_ROOT/config"
 
-      # Check if Drupal is already installed
+      # Install or update? Ask the database, not Drupal. `drush status` says
+      # "Successful" only after a full bootstrap, so a production DB that Drupal
+      # could not boot (a PHP fatal in new code, a stale cached container, a
+      # half-finished import) used to fall through to site:install, which drops
+      # every table first. sql:query needs only the configuration bootstrap.
+      # pg_tables lists every table, whatever this user's grants. If the count
+      # cannot be read, stop: neither branch is safe to guess.
       cd "$DRUPAL_ROOT"
-      if sudo -u drupal $DRUSH status --field=bootstrap 2>/dev/null | grep -q "Successful"; then
-        log "Drupal already installed, running updates..."
-        sudo -u drupal $DRUSH updatedb -y 2>&1 | tee -a "$LOG_FILE" || true
+      if ! TABLES=$(sudo -u drupal $DRUSH sql:query "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = 'public'" 2>>"$LOG_FILE"); then
+        log "ERROR: cannot query the database; refusing to install or update"
+        exit 1
+      fi
+      TABLES=$(echo "$TABLES" | tr -d '[:space:]')
+      if ! [[ "$TABLES" =~ ^[0-9]+$ ]]; then
+        log "ERROR: unexpected table count '$TABLES'; refusing to install or update"
+        exit 1
+      fi
+
+      if [ "$TABLES" -gt 0 ]; then
+        log "Database has $TABLES tables; Drupal already installed, running updates..."
+        if ! sudo -u drupal $DRUSH updatedb -y 2>&1 | tee -a "$LOG_FILE"; then
+          log "ERROR: updatedb failed"
+          exit 1
+        fi
 
         # Clean up orphaned s3fs module references (s3fs → az_blob_fs migration).
         # If the DB was synced from an environment where s3fs was still enabled,
@@ -273,8 +316,11 @@ write_files:
         # Import config if config directory has files
         if [ -f "$CONFIG_SYNC_DIR/system.site.yml" ]; then
           log "Config sync directory has config, importing..."
+          # drush exits 0 on "no changes", so a failure is a real failure (a
+          # veto, or a partial import). Carry on so the cache:rebuild below
+          # still runs.
           sudo -u drupal $DRUSH config:import -y 2>&1 | tee -a "$LOG_FILE" || {
-            log "Config import failed (may be no changes), continuing..."
+            log "ERROR: config:import failed; active config may not match the code. Continuing."
           }
         else
           log "No config in sync directory, skipping import"
@@ -283,12 +329,20 @@ write_files:
         sudo -u drupal $DRUSH cache:rebuild 2>&1 | tee -a "$LOG_FILE" || true
         log "Updates complete"
       else
-        log "Installing Drupal..."
+        # From /opt/fetch-secrets.sh (Key Vault), so it stays out of custom_data.
+        ADMIN_PASSWORD_FILE="/etc/drupal/admin-password"
+        if [ ! -s "$ADMIN_PASSWORD_FILE" ]; then
+          log "ERROR: the database is empty but Key Vault gave no admin password; refusing to install"
+          exit 1
+        fi
+        # URL-encode the password: @ : / # % would otherwise break the db-url.
+        DB_PASSWORD_URL=$(DB_PASSWORD="$DB_PASSWORD" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["DB_PASSWORD"], safe=""))')
+        log "Database has no tables; installing Drupal..."
         sudo -u drupal $DRUSH site:install standard \
-          --db-url="pgsql://${db_user}:$DB_PASSWORD@${db_host}:5432/${db_name}" \
+          --db-url="pgsql://${db_user}:$DB_PASSWORD_URL@${db_host}:5432/${db_name}" \
           --site-name="lib-main" \
           --account-name=admin \
-          --account-pass="${drupal_admin_password}" \
+          --account-pass="$(cat "$ADMIN_PASSWORD_FILE")" \
           --account-mail="admin@example.com" \
           -y 2>&1 | tee -a "$LOG_FILE"
 
@@ -394,7 +448,9 @@ write_files:
     owner: root:root
     content: |
       #!/bin/bash
-      set -e
+      # pipefail: certbot output goes through tee, which would otherwise hide a
+      # failed certbot from set -e.
+      set -eo pipefail
 
       DOMAIN="${domain_name}"
       STORAGE_ACCOUNT="${storage_account}"
@@ -417,45 +473,69 @@ write_files:
           | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
       }
 
-      # Download blob from Azure Storage
+      # Download a blob to a file. Returns 0 on 200, 2 when the blob does not
+      # exist (404), and 1 on any other failure.
       download_blob() {
         local blob_path="$1"
         local dest="$2"
-        local token
-        token=$(get_token)
-        local http_code
+        local token http_code
+        token=$(get_token 2>/dev/null) || return 1
         http_code=$(curl -s -o "$dest" -w "%%{http_code}" \
           -H "Authorization: Bearer $token" \
           -H "x-ms-version: 2020-10-02" \
-          "https://$STORAGE_ACCOUNT.blob.core.windows.net/$CERT_CONTAINER/$blob_path")
-        [ "$http_code" = "200" ]
+          "https://$STORAGE_ACCOUNT.blob.core.windows.net/$CERT_CONTAINER/$blob_path") || return 1
+        [ "$http_code" = "200" ] && return 0
+        [ "$http_code" = "404" ] && return 2
+        return 1
       }
 
-      # Upload blob to Azure Storage
+      # Upload a file to Azure Storage. Fails unless Azure answers 201 Created.
       upload_blob() {
         local src="$1"
         local blob_path="$2"
-        local token
-        token=$(get_token)
-        curl -s -X PUT \
+        local token http_code
+        token=$(get_token 2>/dev/null) || return 1
+        http_code=$(curl -s -o /dev/null -w "%%{http_code}" -X PUT \
           -H "Authorization: Bearer $token" \
           -H "x-ms-version: 2020-10-02" \
           -H "x-ms-blob-type: BlockBlob" \
           -H "Content-Type: application/x-pem-file" \
           --data-binary "@$src" \
-          "https://$STORAGE_ACCOUNT.blob.core.windows.net/$CERT_CONTAINER/$blob_path"
+          "https://$STORAGE_ACCOUNT.blob.core.windows.net/$CERT_CONTAINER/$blob_path") || return 1
+        [ "$http_code" = "201" ]
       }
 
       CERT_VALID=false
 
-      # Try to download existing cert from blob storage
+      # Try to download existing cert from blob storage. Both files go to a
+      # temp dir first and are installed only as a valid pair, so an error
+      # body never replaces the cert or key Apache is using. A 404 means there
+      # is no cert yet. Any other failure (IMDS, RBAC lag, a storage hiccup) is
+      # retried, so it does not cost a new Let's Encrypt issuance (5 duplicate
+      # certs per week).
       log "Checking for existing certificate in blob storage..."
-      if download_blob "$DOMAIN/fullchain.pem" "$CERT_FILE" && \
-         download_blob "$DOMAIN/privkey.pem" "$KEY_FILE"; then
-        chmod 644 "$CERT_FILE"
-        chmod 600 "$KEY_FILE"
+      TMP_DIR=$(mktemp -d)
+      trap 'rm -rf "$TMP_DIR"' EXIT
+      FETCHED=false
+      for attempt in 1 2 3 4 5 6; do
+        rc=0
+        { download_blob "$DOMAIN/fullchain.pem" "$TMP_DIR/fullchain.pem" && \
+          download_blob "$DOMAIN/privkey.pem" "$TMP_DIR/privkey.pem"; } || rc=$?
+        if [ "$rc" -eq 0 ]; then
+          FETCHED=true
+          break
+        fi
+        [ "$rc" -eq 2 ] && break
+        log "Certificate download attempt $attempt failed; retrying in 10s..."
+        sleep 10
+      done
+      if [ "$FETCHED" = true ]; then
         # Validate cert is not expired/expiring within 7 days
-        if openssl x509 -checkend 604800 -noout -in "$CERT_FILE" 2>/dev/null; then
+        if openssl x509 -checkend 604800 -noout -in "$TMP_DIR/fullchain.pem" 2>/dev/null; then
+          # install, not mv: a new file takes the SELinux label of its target
+          # directory, and Apache cannot read a file labelled for /tmp.
+          install -m 644 "$TMP_DIR/fullchain.pem" "$CERT_FILE"
+          install -m 600 "$TMP_DIR/privkey.pem" "$KEY_FILE"
           log "Valid certificate found in blob storage"
           CERT_VALID=true
         else
@@ -471,12 +551,15 @@ write_files:
         dnf install -y certbot 2>&1 | tail -1 | tee -a "$LOG_FILE"
 
         log "Requesting certificate from Let's Encrypt..."
-        certbot certonly --webroot \
+        if ! certbot certonly --webroot \
           -w /var/www/drupal/web \
           -d "$DOMAIN" \
           --register-unsafely-without-email \
           --agree-tos \
-          --non-interactive 2>&1 | tee -a "$LOG_FILE"
+          --non-interactive 2>&1 | tee -a "$LOG_FILE"; then
+          log "ERROR: certbot failed; no certificate for $DOMAIN"
+          exit 1
+        fi
 
         # Copy certbot certs to standard location
         cp "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$CERT_FILE"
@@ -486,9 +569,12 @@ write_files:
 
         # Upload to blob storage for other instances
         log "Uploading certificate to blob storage..."
-        upload_blob "$CERT_FILE" "$DOMAIN/fullchain.pem"
-        upload_blob "$KEY_FILE" "$DOMAIN/privkey.pem"
-        log "Certificate uploaded to blob storage"
+        if upload_blob "$CERT_FILE" "$DOMAIN/fullchain.pem" && \
+           upload_blob "$KEY_FILE" "$DOMAIN/privkey.pem"; then
+          log "Certificate uploaded to blob storage"
+        else
+          log "ERROR: certificate upload to blob storage failed; other instances will request their own"
+        fi
 
         CERT_VALID=true
       fi
@@ -536,8 +622,8 @@ write_files:
 
           Header always set X-Frame-Options "SAMEORIGIN"
           Header always set X-Content-Type-Options "nosniff"
-          Header always set X-XSS-Protection "1; mode=block"
-          Header always set Strict-Transport-Security "max-age=300"
+          # Ramping up: 300 through go-live, one day now, a year next.
+          Header always set Strict-Transport-Security "max-age=86400"
 
           ErrorLog /var/log/httpd/drupal-ssl-error.log
           CustomLog /var/log/httpd/drupal-ssl-access.log combined
@@ -573,9 +659,9 @@ write_files:
           # Certbot issued the cert — use certbot renewal
           cat > /etc/letsencrypt/renewal-hooks/deploy/01-update-and-upload.sh <<'RENEWEOF'
       #!/bin/bash
-      DOMAIN="$RENEWED_DOMAINS"
-      cp "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" /etc/pki/tls/certs/letsencrypt-fullchain.pem
-      cp "/etc/letsencrypt/live/$DOMAIN/privkey.pem" /etc/pki/tls/private/letsencrypt-privkey.pem
+      # RENEWED_LINEAGE is the live/ directory; RENEWED_DOMAINS is a list.
+      cp "$RENEWED_LINEAGE/fullchain.pem" /etc/pki/tls/certs/letsencrypt-fullchain.pem
+      cp "$RENEWED_LINEAGE/privkey.pem" /etc/pki/tls/private/letsencrypt-privkey.pem
       chmod 644 /etc/pki/tls/certs/letsencrypt-fullchain.pem
       chmod 600 /etc/pki/tls/private/letsencrypt-privkey.pem
       systemctl restart httpd
@@ -607,11 +693,13 @@ write_files:
           systemctl start certbot-renew.timer
           log "Certbot renewal timer enabled"
         else
-          # Cert came from blob — set up daily cron to check expiry and re-fetch
+          # Cert came from blob — set up daily cron to check expiry and re-fetch.
+          # tls-setup.sh only writes the new cert; Apache keeps serving the old
+          # one until it reloads.
           cat > /etc/cron.daily/tls-check <<CRONEOF
       #!/bin/bash
       if ! openssl x509 -checkend 604800 -noout -in /etc/pki/tls/certs/letsencrypt-fullchain.pem 2>/dev/null; then
-        /opt/tls-setup.sh
+        /opt/tls-setup.sh && systemctl reload httpd
       fi
       CRONEOF
           chmod 750 /etc/cron.daily/tls-check

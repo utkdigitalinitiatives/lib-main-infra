@@ -217,37 +217,23 @@ module "blob_storage" {
   tags = local.common_tags
 }
 
-# SAS token for Apache reverse proxy to serve blob storage files (read-only, 2-year expiry)
-data "azurerm_storage_account_sas" "media_read" {
+# SAS token for Apache reverse proxy to serve blob storage files (read-only, 2-year expiry).
+# Scoped to the media container. The account holds tls-certs too, private key
+# included, and an account SAS would read it.
+data "azurerm_storage_account_blob_container_sas" "media_read" {
   connection_string = module.blob_storage.primary_connection_string
+  container_name    = module.blob_storage.container_name
   https_only        = true
   start             = "2026-01-01T00:00:00Z"
   expiry            = "2028-01-01T00:00:00Z"
 
-  resource_types {
-    service   = false
-    container = false
-    object    = true
-  }
-
-  services {
-    blob  = true
-    queue = false
-    table = false
-    file  = false
-  }
-
   permissions {
-    read    = true
-    write   = false
-    delete  = false
-    list    = false
-    add     = false
-    create  = false
-    update  = false
-    process = false
-    tag     = false
-    filter  = false
+    read   = true
+    add    = false
+    create = false
+    write  = false
+    delete = false
+    list   = false
   }
 }
 
@@ -400,12 +386,12 @@ module "vmss" {
     # Escape % so mod_rewrite doesn't interpret %2B / %2F / %3D as backreferences (%N).
     # The escaped \% becomes a literal % in the substitution; combined with [NE] flag
     # in the RewriteRule and proxy-nocanon env, the SAS reaches Azure verbatim.
-    storage_sas_token     = replace(data.azurerm_storage_account_sas.media_read.sas, "%", "\\%")
-    lb_fqdn               = module.load_balancer.public_ip_fqdn
-    drupal_admin_password = var.drupal_admin_password != null ? var.drupal_admin_password : random_password.drupal_admin.result
-    drupal_site_uuid      = var.drupal_site_uuid
-    domain_name           = var.domain_name
-    enable_https          = var.enable_https
+    storage_sas_token                 = replace(data.azurerm_storage_account_blob_container_sas.media_read.sas, "%", "\\%")
+    lb_fqdn                           = module.load_balancer.public_ip_fqdn
+    drupal_admin_password_secret_name = azurerm_key_vault_secret.drupal_admin_password.name
+    drupal_site_uuid                  = var.drupal_site_uuid
+    domain_name                       = var.domain_name
+    enable_https                      = var.enable_https
   })
 
   tags = merge(local.common_tags, {
