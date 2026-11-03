@@ -131,15 +131,19 @@ write_files:
         exit 1
       fi
 
+      # Each value lands inside a single-quoted PHP string, so \ and ' are
+      # escaped for PHP.
       DB_PASSWORD="$DB_PASSWORD" HASH_SALT="$HASH_SALT" STORAGE_KEY="$STORAGE_KEY" \
         python3 - "$ENV_PHP" <<'PYEOF'
       import os, sys
+      def php(value):
+          return value.replace('\\', '\\\\').replace("'", "\\'")
       path = sys.argv[1]
       with open(path) as f:
           content = f.read()
-      content = content.replace('__DB_PASSWORD__', os.environ['DB_PASSWORD'])
-      content = content.replace('__HASH_SALT__', os.environ['HASH_SALT'])
-      content = content.replace('__STORAGE_KEY__', os.environ['STORAGE_KEY'])
+      content = content.replace('__DB_PASSWORD__', php(os.environ['DB_PASSWORD']))
+      content = content.replace('__HASH_SALT__', php(os.environ['HASH_SALT']))
+      content = content.replace('__STORAGE_KEY__', php(os.environ['STORAGE_KEY']))
       with open(path, 'w') as f:
           f.write(content)
       PYEOF
@@ -154,18 +158,26 @@ write_files:
         MIGRATE_JSON=$(fetch_secret "migrate-pantheon-db" "$MIGRATE_TOKEN" || true)
       fi
       if [ -n "$MIGRATE_JSON" ]; then
-        MIGRATE_JSON="$MIGRATE_JSON" python3 - "$ENV_PHP" <<'PYEOF'
+        # Wrapped in if/then so a malformed secret logs a warning instead of
+        # aborting fetch-secrets.sh under `set -e` (same as production).
+        if MIGRATE_JSON="$MIGRATE_JSON" python3 - "$ENV_PHP" 2>/dev/null <<'PYEOF'
       import os, sys, json
+      def php(value):
+          return value.replace('\\', '\\\\').replace("'", "\\'")
       path = sys.argv[1]
       creds = json.loads(os.environ['MIGRATE_JSON'])
       with open(path) as f:
           content = f.read()
       for token, field in [('NAME', 'database'), ('USER', 'username'), ('PASS', 'password'), ('HOST', 'host'), ('PORT', 'port')]:
-          content = content.replace('__MIGRATE_DB_' + token + '__', str(creds[field]))
+          content = content.replace('__MIGRATE_DB_' + token + '__', php(str(creds[field])))
       with open(path, 'w') as f:
           f.write(content)
       PYEOF
-        log "Migrate (Pantheon) source DB credentials injected"
+        then
+          log "Migrate (Pantheon) source DB credentials injected"
+        else
+          log "WARNING: migrate-pantheon-db present but could not be applied (malformed JSON?); continuing boot"
+        fi
       else
         log "No migrate-pantheon-db secret; migration source not configured (normal outside migration)"
       fi
