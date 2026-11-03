@@ -183,6 +183,7 @@ write_files:
       {
         printf 'DB_PASSWORD=%q\n' "$DB_PASSWORD"
         printf 'PRIVATE_STORAGE_KEY=%q\n' "$PRIVATE_STORAGE_KEY"
+        printf 'ADMIN_PASSWORD_FILE=%q\n' "$ADMIN_PASSWORD_FILE"
       } > "$SECRETS_ENV"
       chmod 640 "$SECRETS_ENV"
       chown root:drupal "$SECRETS_ENV"
@@ -329,9 +330,9 @@ write_files:
         sudo -u drupal $DRUSH cache:rebuild 2>&1 | tee -a "$LOG_FILE" || true
         log "Updates complete"
       else
-        # From /opt/fetch-secrets.sh (Key Vault), so it stays out of custom_data.
-        ADMIN_PASSWORD_FILE="/etc/drupal/admin-password"
-        if [ ! -s "$ADMIN_PASSWORD_FILE" ]; then
+        # Written by /opt/fetch-secrets.sh (Key Vault), so it stays out of
+        # custom_data. The path comes from secrets.env.
+        if [ -z "$ADMIN_PASSWORD_FILE" ] || [ ! -s "$ADMIN_PASSWORD_FILE" ]; then
           log "ERROR: the database is empty but Key Vault gave no admin password; refusing to install"
           exit 1
         fi
@@ -513,6 +514,15 @@ write_files:
       # is no cert yet. Any other failure (IMDS, RBAC lag, a storage hiccup) is
       # retried, so it does not cost a new Let's Encrypt issuance (5 duplicate
       # certs per week).
+      # The cert and the key must hold the same public key. They can differ
+      # when another node (a MaxSurge instance) is between its two uploads.
+      pair_matches() {
+        local cert_pub key_pub
+        cert_pub=$(openssl x509 -noout -pubkey -in "$1" 2>/dev/null) || return 1
+        key_pub=$(openssl pkey -pubout -in "$2" 2>/dev/null) || return 1
+        [ -n "$cert_pub" ] && [ "$cert_pub" = "$key_pub" ]
+      }
+
       log "Checking for existing certificate in blob storage..."
       TMP_DIR=$(mktemp -d)
       trap 'rm -rf "$TMP_DIR"' EXIT
@@ -522,8 +532,13 @@ write_files:
         { download_blob "$DOMAIN/fullchain.pem" "$TMP_DIR/fullchain.pem" && \
           download_blob "$DOMAIN/privkey.pem" "$TMP_DIR/privkey.pem"; } || rc=$?
         if [ "$rc" -eq 0 ]; then
-          FETCHED=true
-          break
+          if pair_matches "$TMP_DIR/fullchain.pem" "$TMP_DIR/privkey.pem"; then
+            FETCHED=true
+            break
+          fi
+          log "Certificate and key in blob storage do not match (attempt $attempt); retrying in 10s..."
+          sleep 10
+          continue
         fi
         [ "$rc" -eq 2 ] && break
         log "Certificate download attempt $attempt failed; retrying in 10s..."
@@ -542,7 +557,7 @@ write_files:
           log "Certificate from blob storage is expired or expiring soon"
         fi
       else
-        log "No certificate found in blob storage"
+        log "No usable certificate in blob storage"
       fi
 
       # Issue new cert with certbot if needed
