@@ -3,7 +3,8 @@
 # ------------------------------------------------------------------------------
 # What this stack owns (all in lib-main-devtest-rg):
 #   - PostgreSQL Flexible Server: drupal-devtest-psql (Burstable B1ms)
-#   - Blob storage account:       drupaldevtest05q0a0t6 (drupal-media container)
+#   - Blob storage account:       drupaldevtest05q0a0t6 (drupal-media container,
+#                                 plus the private db-dumps container)
 #   - Automation Account:         lib-main-devtest-automation (weekly auto-stop)
 #
 # Lifecycle: applied manually, set-and-forget. These resources persist
@@ -122,6 +123,14 @@ module "blob_storage" {
     mcheeti1 = "b8259997-975d-4b87-b799-87caab129a51"
     wveale   = "24511b84-14e4-4dc5-bba4-19e4b7a4a1b0"
   }
+
+  # Private container that .github/workflows/dump-production-db.yml writes
+  # production dumps into, so devs can seed their local DDEV. Dumps expire
+  # after db_dump_retention_days. Actions artifacts are unsafe here because
+  # this repository is public.
+  enable_db_dumps_container = true
+  db_dumps_container_name   = "db-dumps"
+  db_dump_retention_days    = 7
 
   tags = local.common_tags
 }

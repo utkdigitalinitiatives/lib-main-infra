@@ -150,6 +150,72 @@ resource "azurerm_role_assignment" "dev_blob_contributor" {
   principal_id         = each.value
 }
 
+# ------------------------------------------------------------------------------
+# Production database dumps (devtest only)
+# ------------------------------------------------------------------------------
+# Written by .github/workflows/dump-production-db.yml, read by developers to
+# seed their local DDEV. A GitHub Actions artifact is NOT an alternative: this
+# repository is public, so an artifact holding users.pass hashes and staff
+# emails would be downloadable by anyone who can see the Actions tab. Hence a
+# private container plus per-person RBAC.
+resource "azurerm_storage_container" "db_dumps" {
+  count                 = var.enable_db_dumps_container ? 1 : 0
+  name                  = var.db_dumps_container_name
+  storage_account_id    = azurerm_storage_account.drupal.id
+  container_access_type = "private"
+}
+
+# Expire dumps so production copies do not accumulate.
+#
+# Two caveats worth knowing before trusting the number:
+#   - Lifecycle management is a once-a-day best-effort sweep. Azure documents up
+#     to 48h between a blob ageing out and actually being deleted.
+#   - Blob soft delete (var.soft_delete_retention_days) keeps a deleted dump
+#     recoverable for that many days afterwards.
+# Real worst-case lifetime is therefore retention + soft delete + a day or two.
+#
+# A storage account may hold exactly ONE management policy. Anything else
+# needing lifecycle rules on this account must add a `rule` block here rather
+# than a second azurerm_storage_management_policy resource.
+resource "azurerm_storage_management_policy" "db_dumps" {
+  count              = var.enable_db_dumps_container ? 1 : 0
+  storage_account_id = azurerm_storage_account.drupal.id
+
+  rule {
+    name    = "expire-db-dumps"
+    enabled = true
+
+    filters {
+      # Bare container name matches every blob inside it.
+      prefix_match = [var.db_dumps_container_name]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        delete_after_days_since_creation_greater_than = var.db_dump_retention_days
+      }
+    }
+  }
+}
+
+# Developer read access to the dumps. The dev signs in as themselves
+# (`az login`) and reads with --auth-mode login; nobody is handed a SAS token,
+# a storage account key, or the database password.
+#
+# Today dev_blob_contributor above already covers this container, because it is
+# granted at ACCOUNT scope. This container-scoped grant is what keeps dump
+# access working once that account-scope grant is removed.
+#
+# `.id` is the Resource Manager ID, which is the valid role scope. `.url` is the
+# data-plane URL and is NOT.
+resource "azurerm_role_assignment" "dev_db_dumps_reader" {
+  for_each             = var.enable_db_dumps_container ? var.developer_identities : {}
+  scope                = azurerm_storage_container.db_dumps[0].id
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = each.value
+}
+
 # Role assignment: Allow VMSS managed identity to access blobs
 resource "azurerm_role_assignment" "vmss_blob_contributor" {
   count                = var.enable_vmss_blob_access ? 1 : 0

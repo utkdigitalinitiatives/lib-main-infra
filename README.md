@@ -21,6 +21,7 @@ lib-main-infra/
 │   ├── build-on-dispatch.yml       # Dev merge: build image → dev VM
 │   ├── deploy-on-main-merge.yml    # Main merge: production deploy → dev cleanup
 │   ├── deploy-production.yml       # Manual production rolling update
+│   ├── dump-production-db.yml      # Manual: production DB dump for local DDEV
 │   ├── production-schedule.yml     # Weekday start/stop of production VMSS + PSQL
 │   └── test-cloud-init.yml         # Manual cloud-init testing on dev VMs
 ├── packer/
@@ -107,6 +108,7 @@ The current production environment was bootstrapped once in early 2026 and is no
 | `build-on-dispatch.yml` | `drupal-dev-merge` dispatch from lib-main | Build image → sync DB → deploy dev VM |
 | `deploy-on-main-merge.yml` | `drupal-main-merge` dispatch / Manual | Production deploy → dev VM cleanup |
 | `deploy-production.yml` | Manual | Rolling update to production (rollback/emergency) |
+| `dump-production-db.yml` | Manual | Dump the production DB into the private `db-dumps` container (7-day expiry) for local DDEV; devs download it with `az login` + `--auth-mode login`. Weekdays only, while production is running |
 | `production-schedule.yml` | Weekday cron / Manual | Start production VMSS + PostgreSQL at 6:30 AM ET, deallocate them at 5:30 PM ET |
 | `test-cloud-init.yml` | Manual | Test cloud-init changes on dev VMs |
 

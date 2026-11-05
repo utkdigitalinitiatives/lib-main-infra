@@ -125,9 +125,34 @@ variable "additional_principal_ids" {
 }
 
 variable "developer_identities" {
-  description = "Map of developer username -> Azure AD object ID. Each gets an isolated drupal-media-<username> container plus Storage Blob Data Contributor on the storage account for azcopy sync. Devtest only."
+  description = "Map of developer username -> Azure AD object ID. Each gets an isolated drupal-media-<username> container plus Storage Blob Data Contributor on the storage account for azcopy sync, and Storage Blob Data Reader on the db-dumps container when that is enabled. Devtest only."
   type        = map(string)
   default     = {}
+}
+
+# --- Production database dumps (devtest only) ---------------------------------
+
+variable "enable_db_dumps_container" {
+  description = "Create the private db-dumps container, its expiry policy and the developer reader role assignments. Devtest only."
+  type        = bool
+  default     = false
+}
+
+variable "db_dumps_container_name" {
+  description = "Name of the private container holding production database dumps"
+  type        = string
+  default     = "db-dumps"
+}
+
+variable "db_dump_retention_days" {
+  description = "Delete dumps this many days after creation. Lifecycle management is a daily best-effort sweep and blob soft delete applies on top, so the real lifetime is longer."
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = var.db_dump_retention_days >= 1 && var.db_dump_retention_days <= 99999
+    error_message = "db_dump_retention_days must be between 1 and 99999."
+  }
 }
 
 # Private endpoint (production)
