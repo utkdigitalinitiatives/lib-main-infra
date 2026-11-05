@@ -31,6 +31,11 @@ output "dev_container_urls" {
   }
 }
 
+output "db_dumps_container_name" {
+  description = "Name of the private container holding production database dumps (null when disabled)"
+  value       = var.enable_db_dumps_container ? azurerm_storage_container.db_dumps[0].name : null
+}
+
 output "primary_access_key" {
   description = "Primary access key for the storage account"
   value       = azurerm_storage_account.drupal.primary_access_key
