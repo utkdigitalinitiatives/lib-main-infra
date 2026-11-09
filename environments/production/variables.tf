@@ -187,3 +187,21 @@ variable "public_ip_id" {
   type        = string
   default     = null
 }
+
+# Drupal site mail (drupal/postmark module)
+variable "postmark_token_secret_name" {
+  description = "Key Vault secret that holds the Postmark Server API token for Drupal site mail. Fetched at boot; a missing secret leaves mail unconfigured but never blocks boot."
+  type        = string
+  default     = "shared-postmark-api-token"
+}
+
+variable "postmark_sender_signature" {
+  description = "From address for all Drupal site mail. The postmark module always sends from this address, not the site email. Must be a verified Postmark sender signature or on a verified domain."
+  type        = string
+  default     = "librarieswebsite@utk.edu"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$", var.postmark_sender_signature))
+    error_message = "postmark_sender_signature must be a plain email address (it is written into a PHP string)."
+  }
+}

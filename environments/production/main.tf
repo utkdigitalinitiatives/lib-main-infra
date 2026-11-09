@@ -392,6 +392,8 @@ module "vmss" {
     drupal_site_uuid                  = var.drupal_site_uuid
     domain_name                       = var.domain_name
     enable_https                      = var.enable_https
+    postmark_token_secret_name        = var.postmark_token_secret_name
+    postmark_sender_signature         = var.postmark_sender_signature
   })
 
   tags = merge(local.common_tags, {

@@ -64,6 +64,12 @@ write_files:
       $config['key.key.azure_blob_key']['key_provider'] = 'config';
       $config['key.key.azure_blob_key']['key_provider_settings']['key_value'] = '__STORAGE_KEY__';
 
+      // Site mail (drupal/postmark). The token is substituted at boot by
+      // /opt/fetch-secrets.sh (Key Vault); it is '' when the secret is missing.
+      // These overrides win over the Postmark settings form, so do not use the form on prod.
+      $config['postmark.settings']['postmark_api_key'] = '__POSTMARK_API_KEY__';
+      $config['postmark.settings']['postmark_sender_signature'] = '${postmark_sender_signature}';
+
       // Azure Blob File System configuration
       $config['az_blob_fs.settings']['az_blob_account_name'] = '${storage_account}';
       $config['az_blob_fs.settings']['az_blob_account_key_name'] = 'azure_blob_key';
@@ -101,6 +107,7 @@ write_files:
       STORAGE_KEY_SECRET="${storage_key_secret_name}"
       PRIVATE_STORAGE_KEY_SECRET="${private_files_key_secret_name}"
       ADMIN_PASSWORD_SECRET="${drupal_admin_password_secret_name}"
+      POSTMARK_TOKEN_SECRET="${postmark_token_secret_name}"
       ADMIN_PASSWORD_FILE="/etc/drupal/admin-password"
       ENV_PHP="/etc/drupal/environment.php"
       SECRETS_ENV="/etc/drupal/secrets.env"
@@ -136,6 +143,7 @@ write_files:
       STORAGE_KEY=""
       PRIVATE_STORAGE_KEY=""
       ADMIN_PASSWORD=""
+      POSTMARK_TOKEN=""
       for attempt in $(seq 1 18); do
         TOKEN=$(get_token || true)
         if [ -n "$TOKEN" ]; then
@@ -148,6 +156,9 @@ write_files:
           # Best-effort: /opt/drupal-init.sh needs it only to install into an
           # empty database, and refuses to install without it.
           ADMIN_PASSWORD=$(fetch_secret "$ADMIN_PASSWORD_SECRET" "$TOKEN" || true)
+          # Best-effort: without it site mail fails, as it did before. Mail
+          # must never block boot.
+          POSTMARK_TOKEN=$(fetch_secret "$POSTMARK_TOKEN_SECRET" "$TOKEN" || true)
           [ -n "$DB_PASSWORD" ] && [ -n "$HASH_SALT" ] && [ -n "$STORAGE_KEY" ] && break
         fi
         log "Secret fetch attempt $attempt incomplete; retrying in 10s..."
@@ -162,7 +173,10 @@ write_files:
       # Substitute placeholders in environment.php. Use python rather than sed
       # so '/' '&' '|' in values don't need escaping. Each value lands inside a
       # single-quoted PHP string, so \ and ' are escaped for PHP.
+      # A missing Postmark token becomes '' (never the literal placeholder, which
+      # the module would send to Postmark as a bad key).
       DB_PASSWORD="$DB_PASSWORD" HASH_SALT="$HASH_SALT" STORAGE_KEY="$STORAGE_KEY" \
+        POSTMARK_TOKEN="$POSTMARK_TOKEN" \
         python3 - "$ENV_PHP" <<'PYEOF'
       import os, sys
       def php(value):
@@ -173,9 +187,15 @@ write_files:
       content = content.replace('__DB_PASSWORD__', php(os.environ['DB_PASSWORD']))
       content = content.replace('__HASH_SALT__', php(os.environ['HASH_SALT']))
       content = content.replace('__STORAGE_KEY__', php(os.environ['STORAGE_KEY']))
+      content = content.replace('__POSTMARK_API_KEY__', php(os.environ['POSTMARK_TOKEN']))
       with open(path, 'w') as f:
           f.write(content)
       PYEOF
+      if [ -n "$POSTMARK_TOKEN" ]; then
+        log "Postmark token present: yes"
+      else
+        log "Postmark token present: no ($POSTMARK_TOKEN_SECRET not readable), site mail will not send"
+      fi
 
       # %q quotes each value so `source` reads it back verbatim, whatever
       # characters it holds.
