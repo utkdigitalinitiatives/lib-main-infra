@@ -194,7 +194,7 @@ jobs:
           password: ${{ env.POSTMARK_TOKEN }}
           subject: "Base Image Build Failed - ${{ steps.version.outputs.version }}"
           to: wveale@utk.edu
-          from: "lib-main-infra <wveale@utk.edu>"
+          from: "lib-main-infra <librarieswebsite@utk.edu>"
           body: |
             Base image build failed for version ${{ steps.version.outputs.version }}.
 
