@@ -491,7 +491,7 @@ jobs:
           password: ${{ env.POSTMARK_TOKEN }}
           subject: "Dev VM Ready - ${{ steps.outputs.outputs.public_ip }}"
           to: wveale@utk.edu,aalbro@utk.edu,mcheeti1@utk.edu,dshaw11@utk.edu
-          from: "lib-main-infra <wveale@utk.edu>"
+          from: "lib-main-infra <librarieswebsite@utk.edu>"
           body: |
             Dev VM deployed successfully.
 

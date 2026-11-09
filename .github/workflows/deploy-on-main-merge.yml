@@ -238,7 +238,7 @@ jobs:
           password: ${{ env.POSTMARK_TOKEN }}
           subject: "Production Deploy ${{ job.status == 'success' && 'Complete' || 'Failed' }} - ${{ needs.get-image-version.outputs.image_version }}"
           to: wveale@utk.edu,aalbro@utk.edu,mcheeti1@utk.edu,dshaw11@utk.edu
-          from: "lib-main-infra <wveale@utk.edu>"
+          from: "lib-main-infra <librarieswebsite@utk.edu>"
           body: |
             Production deployment ${{ job.status }}.
 
