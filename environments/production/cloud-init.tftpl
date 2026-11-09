@@ -170,6 +170,18 @@ write_files:
         exit 1
       fi
 
+      # The loop above stops once the required secrets are read, so a single
+      # failed Postmark fetch on that pass would leave site mail off until the
+      # next reimage. Retry only that secret a few more times.
+      for _ in 1 2 3; do
+        [ -n "$POSTMARK_TOKEN" ] && break
+        sleep 5
+        TOKEN=$(get_token || true)
+        if [ -n "$TOKEN" ]; then
+          POSTMARK_TOKEN=$(fetch_secret "$POSTMARK_TOKEN_SECRET" "$TOKEN" || true)
+        fi
+      done
+
       # Substitute placeholders in environment.php. Use python rather than sed
       # so '/' '&' '|' in values don't need escaping. Each value lands inside a
       # single-quoted PHP string, so \ and ' are escaped for PHP.
